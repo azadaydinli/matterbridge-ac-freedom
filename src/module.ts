@@ -50,6 +50,37 @@ const CLOUD_MODE = { AUTO: 4, COOL: 0, HEAT: 1, DRY: 2, FAN: 3 };
 // Fan speed values
 const FAN_SPEED = { AUTO: 0, LOW: 1, MEDIUM: 2, HIGH: 3, TURBO: 4, MUTE: 5 };
 
+interface CloudDeviceConfig {
+  name: string;
+  email: string;
+  password: string;
+  region?: string;
+  deviceId?: string;
+  presetSleep?: boolean;
+  presetHealth?: boolean;
+  presetEco?: boolean;
+  presetClean?: boolean;
+  showFan?: boolean;
+  showComfWind?: boolean;
+  showDisplay?: boolean;
+  tempStep?: number;
+}
+
+interface LocalDeviceConfig {
+  name: string;
+  ip: string;
+  mac: string;
+  presetSleep?: boolean;
+  presetHealth?: boolean;
+  presetEco?: boolean;
+  presetClean?: boolean;
+  showFan?: boolean;
+  showComfWind?: boolean;
+  showDisplay?: boolean;
+  tempStep?: number;
+}
+
+// Unified internal config used after parsing
 interface DeviceConfig {
   name: string;
   connection: 'cloud' | 'local';
@@ -164,13 +195,53 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
   // ── Device Discovery ───────────────────────────────────────────
 
   private async discoverDevices(): Promise<void> {
-    const devices = (this.config.devices as DeviceConfig[]) || [];
-
-    for (const deviceConfig of devices) {
+    // Parse cloud devices
+    const cloudDevices = (this.config.cloudDevices as CloudDeviceConfig[]) || [];
+    for (const cd of cloudDevices) {
+      const unified: DeviceConfig = {
+        name: cd.name,
+        connection: 'cloud',
+        cloudEmail: cd.email,
+        cloudPassword: cd.password,
+        cloudRegion: cd.region,
+        cloudDeviceId: cd.deviceId,
+        presetSleep: cd.presetSleep,
+        presetHealth: cd.presetHealth,
+        presetEco: cd.presetEco,
+        presetClean: cd.presetClean,
+        showFan: cd.showFan,
+        showComfWind: cd.showComfWind,
+        showDisplay: cd.showDisplay,
+        tempStep: cd.tempStep,
+      };
       try {
-        await this.setupDevice(deviceConfig);
+        await this.setupDevice(unified);
       } catch (err) {
-        this.log.error(`Failed to setup device ${deviceConfig.name}: ${(err as Error).message}`);
+        this.log.error(`Failed to setup cloud device ${cd.name}: ${(err as Error).message}`);
+      }
+    }
+
+    // Parse local devices
+    const localDevices = (this.config.localDevices as LocalDeviceConfig[]) || [];
+    for (const ld of localDevices) {
+      const unified: DeviceConfig = {
+        name: ld.name,
+        connection: 'local',
+        localIp: ld.ip,
+        localMac: ld.mac,
+        presetSleep: ld.presetSleep,
+        presetHealth: ld.presetHealth,
+        presetEco: ld.presetEco,
+        presetClean: ld.presetClean,
+        showFan: ld.showFan,
+        showComfWind: ld.showComfWind,
+        showDisplay: ld.showDisplay,
+        tempStep: ld.tempStep,
+      };
+      try {
+        await this.setupDevice(unified);
+      } catch (err) {
+        this.log.error(`Failed to setup local device ${ld.name}: ${(err as Error).message}`);
       }
     }
   }
