@@ -1,0 +1,783 @@
+/**
+ * Matterbridge AC Freedom Plugin
+ *
+ * Exposes AUX air conditioners as composed Matter devices:
+ * - Thermostat (main endpoint: heat/cool/auto + temperature control)
+ * - Fan (child endpoint: speed control)
+ * - On/Off switches (child endpoints: sleep, health, eco, clean, comfortable wind, display)
+ *
+ * All child endpoints are grouped under the thermostat so they appear
+ * as a single device in Apple Home, Google Home, etc.
+ *
+ * Supports both cloud and local (Broadlink UDP) connections.
+ */
+
+import {
+  Matterbridge,
+  MatterbridgeDynamicPlatform,
+  MatterbridgeEndpoint,
+  PlatformConfig,
+  thermostatDevice,
+  fanDevice,
+  onOffSwitch,
+} from 'matterbridge';
+import { Thermostat, FanControl } from 'matterbridge/matter/clusters';
+import { AnsiLogger, LogLevel } from 'matterbridge/logger';
+
+import { AuxCloudAPI, CloudDevice } from './cloud-api.js';
+import { BroadlinkAcApi } from './broadlink-api.js';
+
+// Cloud API param keys
+const CLOUD = {
+  POWER: 'pwr',
+  MODE: 'ac_mode',
+  TEMP_TARGET: 'temp',
+  TEMP_AMBIENT: 'envtemp',
+  FAN_SPEED: 'ac_mark',
+  SWING_V: 'ac_vdir',
+  SWING_H: 'ac_hdir',
+  SLEEP: 'ac_slp',
+  HEALTH: 'ac_health',
+  ECO: 'mldprf',
+  CLEAN: 'ac_clean',
+  COMFWIND: 'comfwind',
+  DISPLAY: 'scrdisp',
+};
+
+// Cloud mode values: 0=COOL, 1=HEAT, 2=DRY, 3=FAN, 4=AUTO
+const CLOUD_MODE = { AUTO: 4, COOL: 0, HEAT: 1, DRY: 2, FAN: 3 };
+
+// Fan speed values
+const FAN_SPEED = { AUTO: 0, LOW: 1, MEDIUM: 2, HIGH: 3, TURBO: 4, MUTE: 5 };
+
+interface DeviceConfig {
+  name: string;
+  connection: 'cloud' | 'local';
+  cloudEmail?: string;
+  cloudPassword?: string;
+  cloudRegion?: string;
+  cloudDeviceId?: string;
+  localIp?: string;
+  localMac?: string;
+  presetSleep?: boolean;
+  presetHealth?: boolean;
+  presetEco?: boolean;
+  presetClean?: boolean;
+  showFan?: boolean;
+  showComfWind?: boolean;
+  showDisplay?: boolean;
+  tempStep?: number;
+}
+
+interface DeviceApi {
+  type: 'cloud' | 'local';
+  api: AuxCloudAPI | BroadlinkAcApi;
+  device?: CloudDevice;
+}
+
+interface AcState {
+  [key: string]: boolean | number;
+  power: boolean;
+  mode: number;
+  targetTemp: number;
+  currentTemp: number;
+  fanSpeed: number;
+  swingV: boolean;
+  swingH: boolean;
+  sleep: boolean;
+  health: boolean;
+  eco: boolean;
+  clean: boolean;
+  comfwind: boolean;
+  display: boolean;
+}
+
+interface ManagedDevice {
+  config: DeviceConfig;
+  deviceApi: DeviceApi;
+  state: AcState;
+  thermostat: MatterbridgeEndpoint;
+  fan?: MatterbridgeEndpoint;
+  switches: Map<string, MatterbridgeEndpoint>;
+  pollTimer?: ReturnType<typeof setInterval>;
+}
+
+const PRESET_DEFS: Array<{ key: string; label: string; cloudKey: string; localAttr: string }> = [
+  { key: 'sleep', label: 'Sleep Mode', cloudKey: CLOUD.SLEEP, localAttr: 'sleep' },
+  { key: 'health', label: 'Health', cloudKey: CLOUD.HEALTH, localAttr: 'health' },
+  { key: 'eco', label: 'Eco', cloudKey: CLOUD.ECO, localAttr: 'mildew' },
+  { key: 'clean', label: 'Clean', cloudKey: CLOUD.CLEAN, localAttr: 'clean' },
+];
+
+export default function initializePlugin(matterbridge: Matterbridge, log: AnsiLogger, config: PlatformConfig): AcFreedomPlatform {
+  return new AcFreedomPlatform(matterbridge, log, config);
+}
+
+export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
+  private managedDevices: ManagedDevice[] = [];
+
+  constructor(matterbridge: Matterbridge, log: AnsiLogger, config: PlatformConfig) {
+    super(matterbridge, log, config);
+
+    if (this.verifyMatterbridgeVersion === undefined || typeof this.verifyMatterbridgeVersion !== 'function' || !this.verifyMatterbridgeVersion('3.4.0')) {
+      throw new Error(
+        `This plugin requires Matterbridge version >= "3.4.0". Please update Matterbridge from ${this.matterbridge.matterbridgeVersion} to the latest version in the frontend.`,
+      );
+    }
+
+    this.log.info('Initializing AC Freedom platform...');
+  }
+
+  override async onStart(reason?: string): Promise<void> {
+    this.log.info(`onStart called with reason: ${reason ?? 'none'}`);
+    await this.ready;
+    await this.clearSelect();
+    await this.discoverDevices();
+  }
+
+  override async onConfigure(): Promise<void> {
+    await super.onConfigure();
+    this.log.info('onConfigure called');
+
+    for (const managed of this.managedDevices) {
+      await this.subscribeDeviceAttributes(managed);
+      this.startPolling(managed);
+    }
+  }
+
+  override async onChangeLoggerLevel(logLevel: LogLevel): Promise<void> {
+    this.log.info(`Log level changed to: ${logLevel}`);
+  }
+
+  override async onShutdown(reason?: string): Promise<void> {
+    await super.onShutdown(reason);
+    this.log.info(`onShutdown called with reason: ${reason ?? 'none'}`);
+
+    for (const managed of this.managedDevices) {
+      if (managed.pollTimer) clearInterval(managed.pollTimer);
+    }
+    this.managedDevices = [];
+
+    if (this.config.unregisterOnShutdown === true) await this.unregisterAllDevices();
+  }
+
+  // ── Device Discovery ───────────────────────────────────────────
+
+  private async discoverDevices(): Promise<void> {
+    const devices = (this.config.devices as DeviceConfig[]) || [];
+
+    for (const deviceConfig of devices) {
+      try {
+        await this.setupDevice(deviceConfig);
+      } catch (err) {
+        this.log.error(`Failed to setup device ${deviceConfig.name}: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  private async setupDevice(deviceConfig: DeviceConfig): Promise<void> {
+    let deviceApi: DeviceApi | null = null;
+
+    if (deviceConfig.connection === 'cloud') {
+      deviceApi = await this.setupCloudDevice(deviceConfig);
+    } else {
+      deviceApi = await this.setupLocalDevice(deviceConfig);
+    }
+
+    if (!deviceApi) return;
+
+    const state: AcState = {
+      power: false,
+      mode: CLOUD_MODE.AUTO,
+      targetTemp: 24,
+      currentTemp: 24,
+      fanSpeed: FAN_SPEED.AUTO,
+      swingV: false,
+      swingH: false,
+      sleep: false,
+      health: false,
+      eco: false,
+      clean: false,
+      comfwind: false,
+      display: true,
+    };
+
+    const managed: ManagedDevice = {
+      config: deviceConfig,
+      deviceApi,
+      state,
+      thermostat: undefined!,
+      switches: new Map(),
+    };
+
+    // Create composed device: thermostat is the main endpoint,
+    // fan and switches are child endpoints under it.
+    await this.createComposedDevice(managed);
+
+    this.managedDevices.push(managed);
+  }
+
+  private async setupCloudDevice(config: DeviceConfig): Promise<DeviceApi | null> {
+    if (!config.cloudEmail || !config.cloudPassword) {
+      this.log.error('Cloud config missing email/password');
+      return null;
+    }
+
+    const api = new AuxCloudAPI(config.cloudRegion || 'eu');
+    try {
+      await api.login(config.cloudEmail, config.cloudPassword);
+      this.log.info(`Cloud login successful: ${config.cloudEmail}`);
+
+      const families = await api.getFamilies();
+      let devices: CloudDevice[] = [];
+      for (const fam of families) {
+        const devs = await api.getDevices(fam.familyid);
+        devices.push(...devs);
+      }
+
+      if (config.cloudDeviceId) {
+        devices = devices.filter(d => d.endpointId === config.cloudDeviceId);
+      }
+
+      if (devices.length === 0) {
+        this.log.error('No cloud devices found');
+        return null;
+      }
+
+      const device = devices[0];
+      this.log.info(`Cloud device: ${device.friendlyName || 'AUX AC'} (${device.endpointId})`);
+      return { type: 'cloud', api, device };
+    } catch (err) {
+      this.log.error(`Cloud login failed: ${(err as Error).message}`);
+      return null;
+    }
+  }
+
+  private async setupLocalDevice(config: DeviceConfig): Promise<DeviceApi | null> {
+    if (!config.localIp || !config.localMac) {
+      this.log.error('Local config missing ip/mac');
+      return null;
+    }
+
+    const api = new BroadlinkAcApi(config.localIp, config.localMac);
+    try {
+      const connected = await api.connect();
+      if (!connected) {
+        this.log.error(`Failed to connect to local device at ${config.localIp}`);
+        return null;
+      }
+      this.log.info(`Local device connected: ${config.localIp}`);
+      return { type: 'local', api };
+    } catch (err) {
+      this.log.error(`Local connection failed: ${(err as Error).message}`);
+      return null;
+    }
+  }
+
+  // ── Composed Device Creation ───────────────────────────────────
+
+  private async createComposedDevice(managed: ManagedDevice): Promise<void> {
+    const name = managed.config.name || 'AUX AC';
+    const serialNumber = managed.deviceApi.type === 'cloud'
+      ? (managed.deviceApi.device?.endpointId || 'cloud-ac')
+      : (managed.config.localMac || 'local-ac');
+
+    // Main thermostat endpoint
+    const thermostat = new MatterbridgeEndpoint(thermostatDevice, { uniqueStorageKey: `ac-${serialNumber}` })
+      .createDefaultBridgedDeviceBasicInformationClusterServer(
+        name,
+        serialNumber,
+        this.matterbridge.aggregatorVendorId,
+        'AUX',
+        'AC Freedom',
+        10000,
+        '1.0.0',
+      )
+      .createDefaultPowerSourceWiredClusterServer()
+      .createDefaultThermostatClusterServer(
+        managed.state.currentTemp,
+        managed.state.targetTemp,
+        managed.state.targetTemp,
+        0,
+        16,
+        32,
+        16,
+        32,
+      )
+      .addRequiredClusterServers();
+
+    // Add Fan as a child endpoint
+    if (managed.config.showFan !== false) {
+      const fanChild = thermostat.addChildDeviceType('Fan', [fanDevice]);
+      fanChild
+        .createDefaultFanControlClusterServer(
+          FanControl.FanMode.Auto,
+          FanControl.FanModeSequence.OffLowMedHighAuto,
+          0,
+          0,
+        )
+        .addRequiredClusterServers();
+      managed.fan = fanChild;
+    }
+
+    // Add preset switches as child endpoints
+    const presets: Record<string, boolean> = {
+      sleep: managed.config.presetSleep !== false,
+      health: managed.config.presetHealth !== false,
+      eco: managed.config.presetEco !== false,
+      clean: managed.config.presetClean !== false,
+    };
+
+    for (const def of PRESET_DEFS) {
+      if (!presets[def.key]) continue;
+      const sw = thermostat.addChildDeviceType(def.label, [onOffSwitch]);
+      sw.createOnOffClusterServer(false).addRequiredClusterServers();
+      managed.switches.set(def.key, sw);
+    }
+
+    // Comfortable Wind switch
+    if (managed.config.showComfWind !== false) {
+      const sw = thermostat.addChildDeviceType('Comfortable Wind', [onOffSwitch]);
+      sw.createOnOffClusterServer(false).addRequiredClusterServers();
+      managed.switches.set('comfwind', sw);
+    }
+
+    // Display switch
+    if (managed.config.showDisplay !== false) {
+      const sw = thermostat.addChildDeviceType('Display', [onOffSwitch]);
+      sw.createOnOffClusterServer(false).addRequiredClusterServers();
+      managed.switches.set('display', sw);
+    }
+
+    // Register the composed device (single registration for all)
+    this.setSelectDevice(serialNumber, name);
+    const selected = this.validateDevice([name, serialNumber]);
+    if (selected) await this.registerDevice(thermostat);
+
+    managed.thermostat = thermostat;
+  }
+
+  // ── Attribute Subscriptions (Matter → Device) ──────────────────
+
+  private async subscribeDeviceAttributes(managed: ManagedDevice): Promise<void> {
+    const { thermostat, fan, switches } = managed;
+
+    // Thermostat: systemMode
+    await thermostat.subscribeAttribute(
+      'Thermostat',
+      'systemMode',
+      (newValue: unknown, _oldValue: unknown) => {
+        this.log.info(`Thermostat systemMode changed to: ${newValue}`);
+        const mode = newValue as Thermostat.SystemMode;
+        if (mode === Thermostat.SystemMode.Off) {
+          managed.state.power = false;
+          this.sendPower(managed, false).catch(e => this.log.warn(`sendPower failed: ${e}`));
+        } else {
+          managed.state.power = true;
+          let acMode: number;
+          switch (mode) {
+            case Thermostat.SystemMode.Heat: acMode = CLOUD_MODE.HEAT; break;
+            case Thermostat.SystemMode.Cool: acMode = CLOUD_MODE.COOL; break;
+            default: acMode = CLOUD_MODE.AUTO; break;
+          }
+          managed.state.mode = acMode;
+          this.sendMode(managed, acMode).catch(e => this.log.warn(`sendMode failed: ${e}`));
+        }
+      },
+    );
+
+    // Thermostat: occupiedCoolingSetpoint
+    await thermostat.subscribeAttribute(
+      'Thermostat',
+      'occupiedCoolingSetpoint',
+      (newValue: unknown) => {
+        const temp = (newValue as number) / 100;
+        this.log.info(`Cooling setpoint changed to: ${temp}°C`);
+        managed.state.targetTemp = temp;
+        this.sendTemperature(managed, temp).catch(e => this.log.warn(`sendTemperature failed: ${e}`));
+      },
+    );
+
+    // Thermostat: occupiedHeatingSetpoint
+    await thermostat.subscribeAttribute(
+      'Thermostat',
+      'occupiedHeatingSetpoint',
+      (newValue: unknown) => {
+        const temp = (newValue as number) / 100;
+        this.log.info(`Heating setpoint changed to: ${temp}°C`);
+        managed.state.targetTemp = temp;
+        this.sendTemperature(managed, temp).catch(e => this.log.warn(`sendTemperature failed: ${e}`));
+      },
+    );
+
+    // Fan: fanMode + percentSetting
+    if (fan) {
+      await fan.subscribeAttribute(
+        'FanControl',
+        'fanMode',
+        (newValue: unknown) => {
+          this.log.info(`Fan mode changed to: ${newValue}`);
+          const fanMode = newValue as FanControl.FanMode;
+          const speed = this.matterFanModeToAcFanSpeed(fanMode);
+          managed.state.fanSpeed = speed;
+          this.sendFanSpeed(managed, speed).catch(e => this.log.warn(`sendFanSpeed failed: ${e}`));
+        },
+      );
+
+      await fan.subscribeAttribute(
+        'FanControl',
+        'percentSetting',
+        (newValue: unknown) => {
+          const percent = (newValue as number | null) ?? 0;
+          this.log.info(`Fan percent changed to: ${percent}%`);
+          const speed = this.percentToFanSpeed(percent);
+          managed.state.fanSpeed = speed;
+          this.sendFanSpeed(managed, speed).catch(e => this.log.warn(`sendFanSpeed failed: ${e}`));
+        },
+      );
+    }
+
+    // Preset switches
+    for (const def of PRESET_DEFS) {
+      const sw = switches.get(def.key);
+      if (!sw) continue;
+      const presetKey = def.key;
+      await sw.subscribeAttribute(
+        'OnOff',
+        'onOff',
+        (newValue: unknown) => {
+          const on = newValue as boolean;
+          this.log.info(`Preset ${presetKey} changed to: ${on}`);
+          if (on) {
+            for (const otherDef of PRESET_DEFS) {
+              if (otherDef.key !== presetKey) {
+                managed.state[otherDef.key] = false;
+              }
+            }
+          }
+          managed.state[presetKey] = on;
+          this.sendPreset(managed, presetKey, on).catch(e => this.log.warn(`sendPreset failed: ${e}`));
+          if (on) this.refreshPresetSwitches(managed, presetKey);
+        },
+      );
+    }
+
+    // Comfortable Wind switch
+    const comfWindSw = switches.get('comfwind');
+    if (comfWindSw) {
+      await comfWindSw.subscribeAttribute(
+        'OnOff',
+        'onOff',
+        (newValue: unknown) => {
+          managed.state.comfwind = newValue as boolean;
+          this.sendComfWind(managed, newValue as boolean).catch(e => this.log.warn(`sendComfWind failed: ${e}`));
+        },
+      );
+    }
+
+    // Display switch
+    const displaySw = switches.get('display');
+    if (displaySw) {
+      await displaySw.subscribeAttribute(
+        'OnOff',
+        'onOff',
+        (newValue: unknown) => {
+          managed.state.display = newValue as boolean;
+          this.sendDisplay(managed, newValue as boolean).catch(e => this.log.warn(`sendDisplay failed: ${e}`));
+        },
+      );
+    }
+  }
+
+  // ── Polling (Device → Matter) ──────────────────────────────────
+
+  private startPolling(managed: ManagedDevice): void {
+    const interval = 30 * 1000;
+    managed.pollTimer = setInterval(() => this.pollState(managed), interval);
+    this.pollState(managed);
+  }
+
+  private async pollState(managed: ManagedDevice): Promise<void> {
+    try {
+      if (managed.deviceApi.type === 'cloud') {
+        await this.pollCloud(managed);
+      } else {
+        await this.pollLocal(managed);
+      }
+      await this.updateMatterAttributes(managed);
+    } catch (err) {
+      this.log.warn(`Poll failed: ${(err as Error).message}`);
+    }
+  }
+
+  private async pollCloud(managed: ManagedDevice): Promise<void> {
+    const { api, device } = managed.deviceApi as { api: AuxCloudAPI; device: CloudDevice };
+    try {
+      const params = await api.getDeviceParams(device);
+      if (!params) return;
+
+      managed.state.power = !!params[CLOUD.POWER];
+      managed.state.mode = params[CLOUD.MODE] ?? CLOUD_MODE.AUTO;
+      managed.state.targetTemp = (params[CLOUD.TEMP_TARGET] ?? 240) / 10;
+      managed.state.currentTemp = (params[CLOUD.TEMP_AMBIENT] ?? 240) / 10;
+      managed.state.fanSpeed = params[CLOUD.FAN_SPEED] ?? FAN_SPEED.AUTO;
+      managed.state.swingV = !!params[CLOUD.SWING_V];
+      managed.state.swingH = !!params[CLOUD.SWING_H];
+      managed.state.sleep = !!params[CLOUD.SLEEP];
+      managed.state.health = !!params[CLOUD.HEALTH];
+      managed.state.eco = !!params[CLOUD.ECO];
+      managed.state.clean = !!params[CLOUD.CLEAN];
+      managed.state.comfwind = !!params[CLOUD.COMFWIND];
+      managed.state.display = !!params[CLOUD.DISPLAY];
+    } catch (err) {
+      const msg = (err as Error).message || '';
+      if (msg.includes('server busy')) return;
+      if (msg.includes('token')) {
+        await api.login(managed.config.cloudEmail!, managed.config.cloudPassword!);
+      }
+      throw err;
+    }
+  }
+
+  private async pollLocal(managed: ManagedDevice): Promise<void> {
+    const api = managed.deviceApi.api as BroadlinkAcApi;
+    const ok = await api.update();
+    if (!ok) return;
+
+    const s = api.state;
+    managed.state.power = !!s.power;
+    managed.state.targetTemp = s.temperature;
+    managed.state.currentTemp = s.ambientTemp;
+    managed.state.fanSpeed = s.fanSpeed;
+    managed.state.swingV = s.verticalFixation === 7;
+    managed.state.swingH = s.horizontalFixation === 7;
+    managed.state.sleep = !!s.sleep;
+    managed.state.health = !!s.health;
+    managed.state.eco = !!s.mildew;
+    managed.state.clean = !!s.clean;
+    managed.state.display = !!s.display;
+
+    const modeMap: Record<number, number> = { 1: CLOUD_MODE.COOL, 2: CLOUD_MODE.DRY, 4: CLOUD_MODE.HEAT, 6: CLOUD_MODE.FAN, 8: CLOUD_MODE.AUTO };
+    managed.state.mode = modeMap[s.mode] ?? CLOUD_MODE.AUTO;
+  }
+
+  private async updateMatterAttributes(managed: ManagedDevice): Promise<void> {
+    const { thermostat, fan, switches, state } = managed;
+
+    // Thermostat systemMode
+    let systemMode: Thermostat.SystemMode;
+    if (!state.power) {
+      systemMode = Thermostat.SystemMode.Off;
+    } else {
+      switch (state.mode) {
+        case CLOUD_MODE.HEAT: systemMode = Thermostat.SystemMode.Heat; break;
+        case CLOUD_MODE.COOL: systemMode = Thermostat.SystemMode.Cool; break;
+        default: systemMode = Thermostat.SystemMode.Auto; break;
+      }
+    }
+    await thermostat.updateAttribute('Thermostat', 'systemMode', systemMode, this.log);
+
+    // Running state
+    const isHeating = state.power && state.mode === CLOUD_MODE.HEAT;
+    const isCooling = state.power && state.mode === CLOUD_MODE.COOL;
+    await thermostat.updateAttribute('Thermostat', 'thermostatRunningState', {
+      heat: isHeating,
+      cool: isCooling,
+      fan: state.power,
+      heatStage2: false,
+      coolStage2: false,
+      fanStage2: false,
+      fanStage3: false,
+    }, this.log);
+
+    // Running mode
+    let runningMode = Thermostat.ThermostatRunningMode.Off;
+    if (state.power) {
+      switch (state.mode) {
+        case CLOUD_MODE.HEAT: runningMode = Thermostat.ThermostatRunningMode.Heat; break;
+        case CLOUD_MODE.COOL: runningMode = Thermostat.ThermostatRunningMode.Cool; break;
+        default: runningMode = Thermostat.ThermostatRunningMode.Off; break;
+      }
+    }
+    await thermostat.updateAttribute('Thermostat', 'thermostatRunningMode', runningMode, this.log);
+
+    // Temperatures (Matter uses hundredths of a degree)
+    await thermostat.updateAttribute('Thermostat', 'localTemperature', Math.round(state.currentTemp * 100), this.log);
+    await thermostat.updateAttribute('Thermostat', 'occupiedCoolingSetpoint', Math.round(state.targetTemp * 100), this.log);
+    await thermostat.updateAttribute('Thermostat', 'occupiedHeatingSetpoint', Math.round(state.targetTemp * 100), this.log);
+
+    // Fan (child endpoint)
+    if (fan) {
+      const fanMode = this.acFanSpeedToMatterFanMode(state.fanSpeed);
+      const percent = this.fanSpeedToPercent(state.fanSpeed);
+      await fan.updateAttribute('FanControl', 'fanMode', fanMode, this.log);
+      await fan.updateAttribute('FanControl', 'percentSetting', percent, this.log);
+      await fan.updateAttribute('FanControl', 'percentCurrent', percent, this.log);
+    }
+
+    // Preset switches (child endpoints)
+    for (const def of PRESET_DEFS) {
+      const sw = switches.get(def.key);
+      if (sw) {
+        await sw.updateAttribute('OnOff', 'onOff', state[def.key] as boolean, this.log);
+      }
+    }
+
+    // ComfWind switch
+    const comfWindSw = switches.get('comfwind');
+    if (comfWindSw) {
+      await comfWindSw.updateAttribute('OnOff', 'onOff', state.comfwind, this.log);
+    }
+
+    // Display switch
+    const displaySw = switches.get('display');
+    if (displaySw) {
+      await displaySw.updateAttribute('OnOff', 'onOff', state.display, this.log);
+    }
+  }
+
+  private async refreshPresetSwitches(managed: ManagedDevice, exceptKey: string): Promise<void> {
+    for (const def of PRESET_DEFS) {
+      if (def.key === exceptKey) continue;
+      const sw = managed.switches.get(def.key);
+      if (sw) {
+        await sw.updateAttribute('OnOff', 'onOff', false, this.log);
+      }
+    }
+  }
+
+  // ── Fan Speed Mapping ──────────────────────────────────────────
+
+  private acFanSpeedToMatterFanMode(speed: number): FanControl.FanMode {
+    switch (speed) {
+      case FAN_SPEED.LOW: return FanControl.FanMode.Low;
+      case FAN_SPEED.MEDIUM: return FanControl.FanMode.Medium;
+      case FAN_SPEED.HIGH: return FanControl.FanMode.High;
+      case FAN_SPEED.TURBO: return FanControl.FanMode.High;
+      case FAN_SPEED.MUTE: return FanControl.FanMode.Low;
+      default: return FanControl.FanMode.Auto;
+    }
+  }
+
+  private matterFanModeToAcFanSpeed(mode: FanControl.FanMode): number {
+    switch (mode) {
+      case FanControl.FanMode.Low: return FAN_SPEED.LOW;
+      case FanControl.FanMode.Medium: return FAN_SPEED.MEDIUM;
+      case FanControl.FanMode.High: return FAN_SPEED.HIGH;
+      case FanControl.FanMode.Auto: return FAN_SPEED.AUTO;
+      default: return FAN_SPEED.AUTO;
+    }
+  }
+
+  private fanSpeedToPercent(speed: number): number {
+    const map: Record<number, number> = { 0: 0, 5: 20, 1: 40, 2: 60, 3: 80, 4: 100 };
+    return map[speed] ?? 0;
+  }
+
+  private percentToFanSpeed(pct: number): number {
+    if (pct <= 0) return FAN_SPEED.AUTO;
+    if (pct <= 20) return FAN_SPEED.MUTE;
+    if (pct <= 40) return FAN_SPEED.LOW;
+    if (pct <= 60) return FAN_SPEED.MEDIUM;
+    if (pct <= 80) return FAN_SPEED.HIGH;
+    return FAN_SPEED.TURBO;
+  }
+
+  // ── Send Commands to Device ────────────────────────────────────
+
+  private async sendPower(managed: ManagedDevice, on: boolean): Promise<void> {
+    if (managed.deviceApi.type === 'cloud') {
+      await this.cloudSet(managed, { [CLOUD.POWER]: on ? 1 : 0 });
+    } else {
+      const api = managed.deviceApi.api as BroadlinkAcApi;
+      api.state.power = on ? 1 : 0;
+      await api.setState();
+    }
+  }
+
+  private async sendMode(managed: ManagedDevice, mode: number): Promise<void> {
+    if (managed.deviceApi.type === 'cloud') {
+      await this.cloudSet(managed, { [CLOUD.POWER]: 1, [CLOUD.MODE]: mode });
+    } else {
+      const localModeMap: Record<number, number> = {
+        [CLOUD_MODE.AUTO]: 8, [CLOUD_MODE.COOL]: 1,
+        [CLOUD_MODE.HEAT]: 4, [CLOUD_MODE.DRY]: 2, [CLOUD_MODE.FAN]: 6,
+      };
+      const api = managed.deviceApi.api as BroadlinkAcApi;
+      api.state.power = 1;
+      api.state.mode = localModeMap[mode] ?? 8;
+      await api.setState();
+    }
+  }
+
+  private async sendTemperature(managed: ManagedDevice, temp: number): Promise<void> {
+    if (managed.deviceApi.type === 'cloud') {
+      await this.cloudSet(managed, { [CLOUD.TEMP_TARGET]: Math.round(temp * 10) });
+    } else {
+      const api = managed.deviceApi.api as BroadlinkAcApi;
+      api.state.temperature = temp;
+      await api.setState();
+    }
+  }
+
+  private async sendFanSpeed(managed: ManagedDevice, speed: number): Promise<void> {
+    if (managed.deviceApi.type === 'cloud') {
+      await this.cloudSet(managed, { [CLOUD.FAN_SPEED]: speed });
+    } else {
+      const api = managed.deviceApi.api as BroadlinkAcApi;
+      api.state.fanSpeed = speed;
+      api.state.turbo = speed === FAN_SPEED.TURBO ? 1 : 0;
+      api.state.mute = speed === FAN_SPEED.MUTE ? 1 : 0;
+      await api.setState();
+    }
+  }
+
+  private async sendPreset(managed: ManagedDevice, key: string, on: boolean): Promise<void> {
+    const def = PRESET_DEFS.find(d => d.key === key);
+    if (!def) return;
+
+    if (managed.deviceApi.type === 'cloud') {
+      const update: Record<string, number> = {
+        [CLOUD.SLEEP]: 0,
+        [CLOUD.HEALTH]: 0,
+        [CLOUD.ECO]: 0,
+        [CLOUD.CLEAN]: 0,
+      };
+      if (on) update[def.cloudKey] = 1;
+      await this.cloudSet(managed, update);
+    } else {
+      const api = managed.deviceApi.api as BroadlinkAcApi;
+      api.state.sleep = 0;
+      api.state.health = 0;
+      api.state.mildew = 0;
+      api.state.clean = 0;
+      if (on) (api.state as unknown as Record<string, number>)[def.localAttr] = 1;
+      await api.setState();
+    }
+  }
+
+  private async sendComfWind(managed: ManagedDevice, on: boolean): Promise<void> {
+    if (managed.deviceApi.type === 'cloud') {
+      await this.cloudSet(managed, { [CLOUD.COMFWIND]: on ? 1 : 0 });
+    } else {
+      const api = managed.deviceApi.api as BroadlinkAcApi;
+      (api.state as unknown as Record<string, number>).comfwind = on ? 1 : 0;
+      await api.setState();
+    }
+  }
+
+  private async sendDisplay(managed: ManagedDevice, on: boolean): Promise<void> {
+    if (managed.deviceApi.type === 'cloud') {
+      await this.cloudSet(managed, { [CLOUD.DISPLAY]: on ? 1 : 0 });
+    } else {
+      const api = managed.deviceApi.api as BroadlinkAcApi;
+      api.state.display = on ? 1 : 0;
+      await api.setState();
+    }
+  }
+
+  private async cloudSet(managed: ManagedDevice, params: Record<string, number>): Promise<void> {
+    const { api, device } = managed.deviceApi as { api: AuxCloudAPI; device: CloudDevice };
+    await api.setDeviceParams(device, params);
+  }
+}

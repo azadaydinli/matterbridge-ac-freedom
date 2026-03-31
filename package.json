@@ -1,0 +1,64 @@
+{
+  "name": "matterbridge-ac-freedom",
+  "version": "1.0.2",
+  "description": "Matterbridge plugin for AUX air conditioners - Cloud and Local control via Matter",
+  "author": "Azad Aydinli",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "dist/module.js",
+  "types": "dist/module.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/module.js",
+      "types": "./dist/module.d.ts"
+    }
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/azadaydinli/matterbridge-ac-freedom.git"
+  },
+  "bugs": {
+    "url": "https://github.com/azadaydinli/matterbridge-ac-freedom/issues"
+  },
+  "keywords": [
+    "matterbridge",
+    "matter",
+    "aux",
+    "air-conditioner",
+    "hvac",
+    "broadlink",
+    "smarthome",
+    "homeassistant",
+    "google-home",
+    "alexa",
+    "apple-home"
+  ],
+  "files": [
+    "dist",
+    "CHANGELOG.md",
+    "*.config.json",
+    "*.schema.json"
+  ],
+  "scripts": {
+    "build": "tsc --project tsconfig.build.json",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "cleanBuild": "npm run clean && npm run build",
+    "watch": "tsc --watch --project tsconfig.build.json",
+    "dev:link": "npm link --no-fund --no-audit matterbridge",
+    "matterbridge:add": "matterbridge -add .",
+    "matterbridge:remove": "matterbridge -remove .",
+    "matterbridge:enable": "matterbridge -enable .",
+    "matterbridge:disable": "matterbridge -disable ."
+  },
+  "dependencies": {
+    "node-ansi-logger": "3.2.0",
+    "node-persist-manager": "2.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.15.3",
+    "typescript": "5.8.3"
+  }
+}

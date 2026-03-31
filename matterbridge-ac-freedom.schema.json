@@ -1,0 +1,150 @@
+{
+  "title": "AC Freedom",
+  "description": "matterbridge-ac-freedom v. 1.0.0 by https://github.com/azadaydinli",
+  "type": "object",
+  "properties": {
+    "name": {
+      "title": "Plugin Name",
+      "description": "Plugin name",
+      "type": "string",
+      "readOnly": true,
+      "ui:widget": "hidden"
+    },
+    "type": {
+      "title": "Plugin Type",
+      "description": "Plugin type",
+      "type": "string",
+      "readOnly": true,
+      "ui:widget": "hidden"
+    },
+    "debug": {
+      "title": "Enable Debug",
+      "description": "Enable debug logging",
+      "type": "boolean",
+      "default": false
+    },
+    "unregisterOnShutdown": {
+      "title": "Unregister On Shutdown",
+      "description": "Unregister all devices on shutdown (development only)",
+      "type": "boolean",
+      "default": false,
+      "ui:widget": "hidden"
+    },
+    "devices": {
+      "title": "Devices",
+      "description": "List of AUX AC devices to control",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "connection"],
+        "properties": {
+          "name": {
+            "title": "Device Name",
+            "description": "Display name for this AC unit",
+            "type": "string"
+          },
+          "connection": {
+            "title": "Connection Type",
+            "description": "How to connect to the AC unit",
+            "type": "string",
+            "oneOf": [
+              { "title": "Cloud", "enum": ["cloud"] },
+              { "title": "Local", "enum": ["local"] }
+            ],
+            "default": "cloud"
+          },
+          "cloudEmail": {
+            "title": "Cloud: Email",
+            "description": "AUX / BroadLink cloud account email (only for cloud connection)",
+            "type": "string"
+          },
+          "cloudPassword": {
+            "title": "Cloud: Password",
+            "description": "AUX / BroadLink cloud account password (only for cloud connection)",
+            "type": "string",
+            "ui:widget": "password"
+          },
+          "cloudRegion": {
+            "title": "Cloud: Region",
+            "description": "Cloud server region (only for cloud connection)",
+            "type": "string",
+            "oneOf": [
+              { "title": "Europe", "enum": ["eu"] },
+              { "title": "USA", "enum": ["usa"] },
+              { "title": "China", "enum": ["cn"] },
+              { "title": "Russia", "enum": ["rus"] }
+            ],
+            "default": "eu"
+          },
+          "cloudDeviceId": {
+            "title": "Cloud: Device ID",
+            "description": "Specific device endpoint ID, leave empty to auto-detect first device (only for cloud connection)",
+            "type": "string"
+          },
+          "localIp": {
+            "title": "Local: IP Address",
+            "description": "Local IP address of the Broadlink module (only for local connection)",
+            "type": "string"
+          },
+          "localMac": {
+            "title": "Local: MAC Address",
+            "description": "MAC address of the Broadlink module, format: AA:BB:CC:DD:EE:FF (only for local connection)",
+            "type": "string"
+          },
+          "showFan": {
+            "title": "Show Fan Control",
+            "description": "Expose a separate fan device for speed control",
+            "type": "boolean",
+            "default": true
+          },
+          "showComfWind": {
+            "title": "Show Comfortable Wind",
+            "description": "Expose a switch for comfortable wind mode",
+            "type": "boolean",
+            "default": true
+          },
+          "showDisplay": {
+            "title": "Show Display Switch",
+            "description": "Expose a switch to control the LED display",
+            "type": "boolean",
+            "default": true
+          },
+          "presetSleep": {
+            "title": "Preset: Sleep Mode",
+            "description": "Expose sleep mode switch",
+            "type": "boolean",
+            "default": true
+          },
+          "presetHealth": {
+            "title": "Preset: Health / Ionizer",
+            "description": "Expose health / ionizer switch",
+            "type": "boolean",
+            "default": true
+          },
+          "presetEco": {
+            "title": "Preset: Eco / Mildew",
+            "description": "Expose eco / mildew prevention switch",
+            "type": "boolean",
+            "default": true
+          },
+          "presetClean": {
+            "title": "Preset: Self Clean",
+            "description": "Expose self clean switch",
+            "type": "boolean",
+            "default": true
+          },
+          "tempStep": {
+            "title": "Temperature Step",
+            "description": "Temperature adjustment step size in degrees",
+            "type": "number",
+            "oneOf": [
+              { "title": "0.5°C", "enum": [0.5] },
+              { "title": "1°C", "enum": [1] }
+            ],
+            "default": 0.5
+          }
+        }
+      }
+    }
+  }
+}
