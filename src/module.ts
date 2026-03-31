@@ -50,19 +50,27 @@ const CLOUD_MODE = { AUTO: 4, COOL: 0, HEAT: 1, DRY: 2, FAN: 3 };
 // Fan speed values
 const FAN_SPEED = { AUTO: 0, LOW: 1, MEDIUM: 2, HIGH: 3, TURBO: 4, MUTE: 5 };
 
+interface FeaturesConfig {
+  showFan?: boolean;
+  showComfWind?: boolean;
+  showDisplay?: boolean;
+}
+
+interface PresetsConfig {
+  sleep?: boolean;
+  health?: boolean;
+  eco?: boolean;
+  clean?: boolean;
+}
+
 interface CloudDeviceConfig {
   name: string;
   email: string;
   password: string;
   region?: string;
   deviceId?: string;
-  presetSleep?: boolean;
-  presetHealth?: boolean;
-  presetEco?: boolean;
-  presetClean?: boolean;
-  showFan?: boolean;
-  showComfWind?: boolean;
-  showDisplay?: boolean;
+  features?: FeaturesConfig;
+  presets?: PresetsConfig;
   tempStep?: number;
 }
 
@@ -70,13 +78,8 @@ interface LocalDeviceConfig {
   name: string;
   ip: string;
   mac: string;
-  presetSleep?: boolean;
-  presetHealth?: boolean;
-  presetEco?: boolean;
-  presetClean?: boolean;
-  showFan?: boolean;
-  showComfWind?: boolean;
-  showDisplay?: boolean;
+  features?: FeaturesConfig;
+  presets?: PresetsConfig;
   tempStep?: number;
 }
 
@@ -205,13 +208,13 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
         cloudPassword: cd.password,
         cloudRegion: cd.region,
         cloudDeviceId: cd.deviceId,
-        presetSleep: cd.presetSleep,
-        presetHealth: cd.presetHealth,
-        presetEco: cd.presetEco,
-        presetClean: cd.presetClean,
-        showFan: cd.showFan,
-        showComfWind: cd.showComfWind,
-        showDisplay: cd.showDisplay,
+        presetSleep: cd.presets?.sleep,
+        presetHealth: cd.presets?.health,
+        presetEco: cd.presets?.eco,
+        presetClean: cd.presets?.clean,
+        showFan: cd.features?.showFan,
+        showComfWind: cd.features?.showComfWind,
+        showDisplay: cd.features?.showDisplay,
         tempStep: cd.tempStep,
       };
       try {
@@ -229,13 +232,13 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
         connection: 'local',
         localIp: ld.ip,
         localMac: ld.mac,
-        presetSleep: ld.presetSleep,
-        presetHealth: ld.presetHealth,
-        presetEco: ld.presetEco,
-        presetClean: ld.presetClean,
-        showFan: ld.showFan,
-        showComfWind: ld.showComfWind,
-        showDisplay: ld.showDisplay,
+        presetSleep: ld.presets?.sleep,
+        presetHealth: ld.presets?.health,
+        presetEco: ld.presets?.eco,
+        presetClean: ld.presets?.clean,
+        showFan: ld.features?.showFan,
+        showComfWind: ld.features?.showComfWind,
+        showDisplay: ld.features?.showDisplay,
         tempStep: ld.tempStep,
       };
       try {
@@ -393,10 +396,10 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
 
     // Add preset switches as child endpoints
     const presets: Record<string, boolean> = {
-      sleep: managed.config.presetSleep !== false,
-      health: managed.config.presetHealth !== false,
-      eco: managed.config.presetEco !== false,
-      clean: managed.config.presetClean !== false,
+      sleep: managed.config.presetSleep === true,
+      health: managed.config.presetHealth === true,
+      eco: managed.config.presetEco === true,
+      clean: managed.config.presetClean === true,
     };
 
     for (const def of PRESET_DEFS) {
@@ -407,14 +410,14 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
     }
 
     // Comfortable Wind switch
-    if (managed.config.showComfWind !== false) {
+    if (managed.config.showComfWind === true) {
       const sw = thermostat.addChildDeviceType('Comfortable Wind', [onOffSwitch]);
       sw.createOnOffClusterServer(false).addRequiredClusterServers();
       managed.switches.set('comfwind', sw);
     }
 
     // Display switch
-    if (managed.config.showDisplay !== false) {
+    if (managed.config.showDisplay === true) {
       const sw = thermostat.addChildDeviceType('Display', [onOffSwitch]);
       sw.createOnOffClusterServer(false).addRequiredClusterServers();
       managed.switches.set('display', sw);

@@ -1,18 +1,16 @@
 {
   "title": "AC Freedom",
-  "description": "matterbridge-ac-freedom v. 1.0.3 by https://github.com/azadaydinli",
+  "description": "matterbridge-ac-freedom v. 1.0.4 by https://github.com/azadaydinli",
   "type": "object",
   "properties": {
     "name": {
       "title": "Plugin Name",
-      "description": "Plugin name",
       "type": "string",
       "readOnly": true,
       "ui:widget": "hidden"
     },
     "type": {
       "title": "Plugin Type",
-      "description": "Plugin type",
       "type": "string",
       "readOnly": true,
       "ui:widget": "hidden"
@@ -25,7 +23,6 @@
     },
     "unregisterOnShutdown": {
       "title": "Unregister On Shutdown",
-      "description": "Unregister all devices on shutdown (development only)",
       "type": "boolean",
       "default": false,
       "ui:widget": "hidden"
@@ -40,23 +37,19 @@
         "properties": {
           "name": {
             "title": "Device Name",
-            "description": "Display name for this AC unit",
             "type": "string"
           },
           "email": {
             "title": "Email",
-            "description": "AUX / BroadLink cloud account email",
             "type": "string"
           },
           "password": {
             "title": "Password",
-            "description": "AUX / BroadLink cloud account password",
             "type": "string",
             "ui:widget": "password"
           },
           "region": {
             "title": "Region",
-            "description": "Cloud server region",
             "type": "string",
             "oneOf": [
               { "title": "Europe", "enum": ["eu"] },
@@ -68,54 +61,60 @@
           },
           "deviceId": {
             "title": "Device ID",
-            "description": "Specific device endpoint ID (leave empty to auto-detect first device)",
+            "description": "Leave empty to auto-detect",
             "type": "string"
           },
-          "showFan": {
-            "title": "Show Fan Control",
-            "description": "Expose a fan device for speed control",
-            "type": "boolean",
-            "default": true
+          "features": {
+            "title": "Features",
+            "description": "Optional features to expose",
+            "type": "object",
+            "properties": {
+              "showFan": {
+                "title": "Fan Control",
+                "type": "boolean",
+                "default": true
+              },
+              "showComfWind": {
+                "title": "Comfortable Wind",
+                "type": "boolean",
+                "default": false
+              },
+              "showDisplay": {
+                "title": "Display Switch",
+                "type": "boolean",
+                "default": false
+              }
+            }
           },
-          "showComfWind": {
-            "title": "Show Comfortable Wind",
-            "description": "Expose a switch for comfortable wind mode",
-            "type": "boolean",
-            "default": true
-          },
-          "showDisplay": {
-            "title": "Show Display Switch",
-            "description": "Expose a switch to control the LED display",
-            "type": "boolean",
-            "default": true
-          },
-          "presetSleep": {
-            "title": "Preset: Sleep Mode",
-            "description": "Expose sleep mode switch",
-            "type": "boolean",
-            "default": true
-          },
-          "presetHealth": {
-            "title": "Preset: Health / Ionizer",
-            "description": "Expose health / ionizer switch",
-            "type": "boolean",
-            "default": true
-          },
-          "presetEco": {
-            "title": "Preset: Eco / Mildew",
-            "description": "Expose eco / mildew prevention switch",
-            "type": "boolean",
-            "default": true
-          },
-          "presetClean": {
-            "title": "Preset: Self Clean",
-            "description": "Expose self clean switch",
-            "type": "boolean",
-            "default": true
+          "presets": {
+            "title": "Preset Modes",
+            "description": "Preset mode switches to expose",
+            "type": "object",
+            "properties": {
+              "sleep": {
+                "title": "Sleep",
+                "type": "boolean",
+                "default": false
+              },
+              "health": {
+                "title": "Health / Ionizer",
+                "type": "boolean",
+                "default": false
+              },
+              "eco": {
+                "title": "Eco / Mildew",
+                "type": "boolean",
+                "default": false
+              },
+              "clean": {
+                "title": "Self Clean",
+                "type": "boolean",
+                "default": false
+              }
+            }
           },
           "tempStep": {
             "title": "Temperature Step",
-            "description": "Temperature adjustment step size in degrees",
             "type": "number",
             "oneOf": [
               { "title": "0.5°C", "enum": [0.5] },
@@ -136,64 +135,68 @@
         "properties": {
           "name": {
             "title": "Device Name",
-            "description": "Display name for this AC unit",
             "type": "string"
           },
           "ip": {
             "title": "IP Address",
-            "description": "Local IP address of the Broadlink module",
             "type": "string"
           },
           "mac": {
             "title": "MAC Address",
-            "description": "MAC address of the Broadlink module (format: AA:BB:CC:DD:EE:FF)",
+            "description": "Format: AA:BB:CC:DD:EE:FF",
             "type": "string"
           },
-          "showFan": {
-            "title": "Show Fan Control",
-            "description": "Expose a fan device for speed control",
-            "type": "boolean",
-            "default": true
+          "features": {
+            "title": "Features",
+            "description": "Optional features to expose",
+            "type": "object",
+            "properties": {
+              "showFan": {
+                "title": "Fan Control",
+                "type": "boolean",
+                "default": true
+              },
+              "showComfWind": {
+                "title": "Comfortable Wind",
+                "type": "boolean",
+                "default": false
+              },
+              "showDisplay": {
+                "title": "Display Switch",
+                "type": "boolean",
+                "default": false
+              }
+            }
           },
-          "showComfWind": {
-            "title": "Show Comfortable Wind",
-            "description": "Expose a switch for comfortable wind mode",
-            "type": "boolean",
-            "default": true
-          },
-          "showDisplay": {
-            "title": "Show Display Switch",
-            "description": "Expose a switch to control the LED display",
-            "type": "boolean",
-            "default": true
-          },
-          "presetSleep": {
-            "title": "Preset: Sleep Mode",
-            "description": "Expose sleep mode switch",
-            "type": "boolean",
-            "default": true
-          },
-          "presetHealth": {
-            "title": "Preset: Health / Ionizer",
-            "description": "Expose health / ionizer switch",
-            "type": "boolean",
-            "default": true
-          },
-          "presetEco": {
-            "title": "Preset: Eco / Mildew",
-            "description": "Expose eco / mildew prevention switch",
-            "type": "boolean",
-            "default": true
-          },
-          "presetClean": {
-            "title": "Preset: Self Clean",
-            "description": "Expose self clean switch",
-            "type": "boolean",
-            "default": true
+          "presets": {
+            "title": "Preset Modes",
+            "description": "Preset mode switches to expose",
+            "type": "object",
+            "properties": {
+              "sleep": {
+                "title": "Sleep",
+                "type": "boolean",
+                "default": false
+              },
+              "health": {
+                "title": "Health / Ionizer",
+                "type": "boolean",
+                "default": false
+              },
+              "eco": {
+                "title": "Eco / Mildew",
+                "type": "boolean",
+                "default": false
+              },
+              "clean": {
+                "title": "Self Clean",
+                "type": "boolean",
+                "default": false
+              }
+            }
           },
           "tempStep": {
             "title": "Temperature Step",
-            "description": "Temperature adjustment step size in degrees",
             "type": "number",
             "oneOf": [
               { "title": "0.5°C", "enum": [0.5] },
