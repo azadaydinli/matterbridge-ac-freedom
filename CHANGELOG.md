@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.10 (2026-04-02)
+
+- **Temperature step fix**: `tempStep` config is now applied. When set to 1°C, temperatures are rounded to the nearest whole degree before sending to the AC. The rounded value is also written back to the Matter attribute so HomeKit UI reflects it (e.g. 24.5 → 25).
+
 ## 1.0.9 (2026-04-02)
 
 - **Restored v1.0.2 composed device pattern**: Fan and Sleep Mode are child endpoints under the thermostat (same approach that worked in v1.0.2). When `showExtras` is ON, fan speed control + sleep mode switch appear inside the climate card. When OFF, only the thermostat is shown.

@@ -381,9 +381,16 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       'occupiedCoolingSetpoint',
       (newValue: unknown) => {
         const temp = (newValue as number) / 100;
-        this.log.info(`Cooling setpoint changed to: ${temp}°C`);
-        managed.state.targetTemp = temp;
-        this.sendTemperature(managed, temp).catch(e => this.log.warn(`sendTemperature failed: ${e}`));
+        const step = managed.config.tempStep || 0.5;
+        const rounded = Math.round(temp / step) * step;
+        this.log.info(`Cooling setpoint changed to: ${temp}°C (rounded to ${rounded}°C, step=${step})`);
+        managed.state.targetTemp = rounded;
+        this.sendTemperature(managed, rounded).catch(e => this.log.warn(`sendTemperature failed: ${e}`));
+        // Update Matter attribute to reflect rounded value
+        if (rounded !== temp) {
+          thermostat.updateAttribute('Thermostat', 'occupiedCoolingSetpoint', Math.round(rounded * 100), this.log).catch(() => {});
+          thermostat.updateAttribute('Thermostat', 'occupiedHeatingSetpoint', Math.round(rounded * 100), this.log).catch(() => {});
+        }
       },
     );
 
@@ -393,9 +400,16 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       'occupiedHeatingSetpoint',
       (newValue: unknown) => {
         const temp = (newValue as number) / 100;
-        this.log.info(`Heating setpoint changed to: ${temp}°C`);
-        managed.state.targetTemp = temp;
-        this.sendTemperature(managed, temp).catch(e => this.log.warn(`sendTemperature failed: ${e}`));
+        const step = managed.config.tempStep || 0.5;
+        const rounded = Math.round(temp / step) * step;
+        this.log.info(`Heating setpoint changed to: ${temp}°C (rounded to ${rounded}°C, step=${step})`);
+        managed.state.targetTemp = rounded;
+        this.sendTemperature(managed, rounded).catch(e => this.log.warn(`sendTemperature failed: ${e}`));
+        // Update Matter attribute to reflect rounded value
+        if (rounded !== temp) {
+          thermostat.updateAttribute('Thermostat', 'occupiedHeatingSetpoint', Math.round(rounded * 100), this.log).catch(() => {});
+          thermostat.updateAttribute('Thermostat', 'occupiedCoolingSetpoint', Math.round(rounded * 100), this.log).catch(() => {});
+        }
       },
     );
 
@@ -627,11 +641,14 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
   }
 
   private async sendTemperature(managed: ManagedDevice, temp: number): Promise<void> {
+    // Round to tempStep (default 0.5)
+    const step = managed.config.tempStep || 0.5;
+    const rounded = Math.round(temp / step) * step;
     if (managed.deviceApi.type === 'cloud') {
-      await this.cloudSet(managed, { [CLOUD.TEMP_TARGET]: Math.round(temp * 10) });
+      await this.cloudSet(managed, { [CLOUD.TEMP_TARGET]: Math.round(rounded * 10) });
     } else {
       const api = managed.deviceApi.api as BroadlinkAcApi;
-      api.state.temperature = temp;
+      api.state.temperature = rounded;
       await api.setState();
     }
   }
