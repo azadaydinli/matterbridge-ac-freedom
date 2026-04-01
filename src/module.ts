@@ -2,12 +2,12 @@
  * Matterbridge AC Freedom Plugin
  *
  * Exposes AUX air conditioners as composed Matter devices:
- * - Thermostat (main endpoint: heat/cool/auto + temperature control)
- * - Fan (child endpoint: speed control)
+ * - Thermostat (main endpoint: heat/cool/auto + temperature + fan control)
  * - On/Off switches (child endpoints: sleep mode, display)
  *
- * All child endpoints are grouped under the thermostat so they appear
- * as a single device in Apple Home, Google Home, etc.
+ * FanControl cluster is added directly to the thermostat endpoint
+ * so HomeKit shows the device as a climate card (not a fan card).
+ * Switches are child endpoints grouped under the thermostat.
  *
  * Supports both cloud and local (Broadlink UDP) connections.
  */
@@ -18,7 +18,6 @@ import {
   MatterbridgeEndpoint,
   PlatformConfig,
   thermostatDevice,
-  fanDevice,
   onOffSwitch,
 } from 'matterbridge';
 import { Thermostat, FanControl } from 'matterbridge/matter/clusters';
@@ -37,7 +36,6 @@ const CLOUD = {
   SWING_V: 'ac_vdir',
   SWING_H: 'ac_hdir',
   SLEEP: 'ac_slp',
-  DISPLAY: 'scrdisp',
 };
 
 // Cloud mode values: 0=COOL, 1=HEAT, 2=DRY, 3=FAN, 4=AUTO
@@ -47,9 +45,7 @@ const CLOUD_MODE = { AUTO: 4, COOL: 0, HEAT: 1, DRY: 2, FAN: 3 };
 const FAN_SPEED = { AUTO: 0, LOW: 1, MEDIUM: 2, HIGH: 3, TURBO: 4, MUTE: 5 };
 
 interface FeaturesConfig {
-  showFan?: boolean;
-  showDisplay?: boolean;
-  showSleep?: boolean;
+  showExtras?: boolean;
 }
 
 interface CloudDeviceConfig {
@@ -80,9 +76,7 @@ interface DeviceConfig {
   cloudDeviceId?: string;
   localIp?: string;
   localMac?: string;
-  showFan?: boolean;
-  showDisplay?: boolean;
-  showSleep?: boolean;
+  showExtras?: boolean;
   tempStep?: number;
 }
 
@@ -102,7 +96,6 @@ interface AcState {
   swingV: boolean;
   swingH: boolean;
   sleep: boolean;
-  display: boolean;
 }
 
 interface ManagedDevice {
@@ -110,7 +103,7 @@ interface ManagedDevice {
   deviceApi: DeviceApi;
   state: AcState;
   thermostat: MatterbridgeEndpoint;
-  fan?: MatterbridgeEndpoint;
+  hasFan: boolean;
   switches: Map<string, MatterbridgeEndpoint>;
   pollTimer?: ReturnType<typeof setInterval>;
 }
@@ -180,9 +173,7 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
         cloudPassword: cd.password,
         cloudRegion: cd.region,
         cloudDeviceId: cd.deviceId,
-        showFan: cd.features?.showFan,
-        showDisplay: cd.features?.showDisplay,
-        showSleep: cd.features?.showSleep,
+        showExtras: cd.features?.showExtras,
         tempStep: cd.tempStep,
       };
       try {
@@ -200,9 +191,7 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
         connection: 'local',
         localIp: ld.ip,
         localMac: ld.mac,
-        showFan: ld.features?.showFan,
-        showDisplay: ld.features?.showDisplay,
-        showSleep: ld.features?.showSleep,
+        showExtras: ld.features?.showExtras,
         tempStep: ld.tempStep,
       };
       try {
@@ -233,7 +222,6 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       swingV: false,
       swingH: false,
       sleep: false,
-      display: true,
     };
 
     const managed: ManagedDevice = {
@@ -241,11 +229,12 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       deviceApi,
       state,
       thermostat: undefined!,
+      hasFan: false,
       switches: new Map(),
     };
 
     // Create composed device: thermostat is the main endpoint,
-    // fan and switches are child endpoints under it.
+    // fan control is on the thermostat, switches are child endpoints.
     await this.createComposedDevice(managed);
 
     this.managedDevices.push(managed);
@@ -340,32 +329,20 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       )
       .addRequiredClusterServers();
 
-    // Add Fan as a child endpoint
-    if (managed.config.showFan === true) {
-      const fanChild = thermostat.addChildDeviceType('Fan', [fanDevice]);
-      fanChild
-        .createDefaultFanControlClusterServer(
-          FanControl.FanMode.Auto,
-          FanControl.FanModeSequence.OffLowMedHighAuto,
-          0,
-          0,
-        )
-        .addRequiredClusterServers();
-      managed.fan = fanChild;
-    }
+    // Add FanControl cluster directly to thermostat endpoint (not as child)
+    // and Sleep Mode switch as child endpoint — both controlled by showExtras
+    if (managed.config.showExtras === true) {
+      thermostat.createDefaultFanControlClusterServer(
+        FanControl.FanMode.Auto,
+        FanControl.FanModeSequence.OffLowMedHighAuto,
+        0,
+        0,
+      );
+      managed.hasFan = true;
 
-    // Sleep Mode switch
-    if (managed.config.showSleep === true) {
       const sw = thermostat.addChildDeviceType('Sleep Mode', [onOffSwitch]);
       sw.createOnOffClusterServer(false).addRequiredClusterServers();
       managed.switches.set('sleep', sw);
-    }
-
-    // Display switch
-    if (managed.config.showDisplay === true) {
-      const sw = thermostat.addChildDeviceType('Display', [onOffSwitch]);
-      sw.createOnOffClusterServer(false).addRequiredClusterServers();
-      managed.switches.set('display', sw);
     }
 
     // Register the composed device (single registration for all)
@@ -379,7 +356,7 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
   // ── Attribute Subscriptions (Matter → Device) ──────────────────
 
   private async subscribeDeviceAttributes(managed: ManagedDevice): Promise<void> {
-    const { thermostat, fan, switches } = managed;
+    const { thermostat, switches } = managed;
 
     // Thermostat: systemMode
     await thermostat.subscribeAttribute(
@@ -429,9 +406,9 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       },
     );
 
-    // Fan: fanMode + percentSetting
-    if (fan) {
-      await fan.subscribeAttribute(
+    // FanControl on thermostat endpoint
+    if (managed.hasFan) {
+      await thermostat.subscribeAttribute(
         'FanControl',
         'fanMode',
         (newValue: unknown) => {
@@ -443,7 +420,7 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
         },
       );
 
-      await fan.subscribeAttribute(
+      await thermostat.subscribeAttribute(
         'FanControl',
         'percentSetting',
         (newValue: unknown) => {
@@ -456,7 +433,7 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       );
     }
 
-    // Sleep Mode switch
+    // Sleep Mode switch (child endpoint)
     const sleepSw = switches.get('sleep');
     if (sleepSw) {
       await sleepSw.subscribeAttribute(
@@ -465,19 +442,6 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
         (newValue: unknown) => {
           managed.state.sleep = newValue as boolean;
           this.sendSleep(managed, newValue as boolean).catch(e => this.log.warn(`sendSleep failed: ${e}`));
-        },
-      );
-    }
-
-    // Display switch
-    const displaySw = switches.get('display');
-    if (displaySw) {
-      await displaySw.subscribeAttribute(
-        'OnOff',
-        'onOff',
-        (newValue: unknown) => {
-          managed.state.display = newValue as boolean;
-          this.sendDisplay(managed, newValue as boolean).catch(e => this.log.warn(`sendDisplay failed: ${e}`));
         },
       );
     }
@@ -518,7 +482,6 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       managed.state.swingV = !!params[CLOUD.SWING_V];
       managed.state.swingH = !!params[CLOUD.SWING_H];
       managed.state.sleep = !!params[CLOUD.SLEEP];
-      managed.state.display = !!params[CLOUD.DISPLAY];
     } catch (err) {
       const msg = (err as Error).message || '';
       if (msg.includes('server busy')) return;
@@ -542,14 +505,13 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
     managed.state.swingV = s.verticalFixation === 7;
     managed.state.swingH = s.horizontalFixation === 7;
     managed.state.sleep = !!s.sleep;
-    managed.state.display = !!s.display;
 
     const modeMap: Record<number, number> = { 1: CLOUD_MODE.COOL, 2: CLOUD_MODE.DRY, 4: CLOUD_MODE.HEAT, 6: CLOUD_MODE.FAN, 8: CLOUD_MODE.AUTO };
     managed.state.mode = modeMap[s.mode] ?? CLOUD_MODE.AUTO;
   }
 
   private async updateMatterAttributes(managed: ManagedDevice): Promise<void> {
-    const { thermostat, fan, switches, state } = managed;
+    const { thermostat, switches, state } = managed;
 
     // Thermostat systemMode
     let systemMode: Thermostat.SystemMode;
@@ -593,25 +555,19 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
     await thermostat.updateAttribute('Thermostat', 'occupiedCoolingSetpoint', Math.round(state.targetTemp * 100), this.log);
     await thermostat.updateAttribute('Thermostat', 'occupiedHeatingSetpoint', Math.round(state.targetTemp * 100), this.log);
 
-    // Fan (child endpoint)
-    if (fan) {
+    // FanControl on thermostat endpoint
+    if (managed.hasFan) {
       const fanMode = this.acFanSpeedToMatterFanMode(state.fanSpeed);
       const percent = this.fanSpeedToPercent(state.fanSpeed);
-      await fan.updateAttribute('FanControl', 'fanMode', fanMode, this.log);
-      await fan.updateAttribute('FanControl', 'percentSetting', percent, this.log);
-      await fan.updateAttribute('FanControl', 'percentCurrent', percent, this.log);
+      await thermostat.updateAttribute('FanControl', 'fanMode', fanMode, this.log);
+      await thermostat.updateAttribute('FanControl', 'percentSetting', percent, this.log);
+      await thermostat.updateAttribute('FanControl', 'percentCurrent', percent, this.log);
     }
 
-    // Sleep Mode switch
+    // Sleep Mode switch (child endpoint)
     const sleepSw = switches.get('sleep');
     if (sleepSw) {
       await sleepSw.updateAttribute('OnOff', 'onOff', state.sleep, this.log);
-    }
-
-    // Display switch
-    const displaySw = switches.get('display');
-    if (displaySw) {
-      await displaySw.updateAttribute('OnOff', 'onOff', state.display, this.log);
     }
   }
 
@@ -707,16 +663,6 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
     } else {
       const api = managed.deviceApi.api as BroadlinkAcApi;
       api.state.sleep = on ? 1 : 0;
-      await api.setState();
-    }
-  }
-
-  private async sendDisplay(managed: ManagedDevice, on: boolean): Promise<void> {
-    if (managed.deviceApi.type === 'cloud') {
-      await this.cloudSet(managed, { [CLOUD.DISPLAY]: on ? 1 : 0 });
-    } else {
-      const api = managed.deviceApi.api as BroadlinkAcApi;
-      api.state.display = on ? 1 : 0;
       await api.setState();
     }
   }

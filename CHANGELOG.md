@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.6 (2026-04-02)
+
+- **HomeKit fix**: FanControl cluster now added directly to the thermostat endpoint instead of as a child device, so the device appears as a climate card (not a fan card) in HomeKit.
+- **Simplified config**: Removed Display switch. Fan Control and Sleep Mode merged into a single "Extra Controls" checkbox.
+- **Schema**: Temperature Step moved above Features section.
+
 ## 1.0.5 (2026-04-01)
 
 - **Simplified features**: Removed ComfWind, Health/Ionizer, Eco/Mildew, and Self Clean. Only Fan Control, Display Switch, and Sleep Mode remain as optional features.
