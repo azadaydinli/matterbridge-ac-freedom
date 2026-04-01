@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.7 (2026-04-02)
+
+- **HomeKit fix**: Reverted fan to child endpoint with `fanDevice` (FanControl on thermostat endpoint was not supported). Thermostat remains the main device type — should display as climate card.
+- **Config UI fix**: Removed nested "Features" section. "Extra Controls" checkbox is now at the same level as other fields (no visual separation).
+- **Extra Controls**: Single checkbox enables both fan speed control and sleep mode switch as child endpoints under the thermostat.
+
 ## 1.0.6 (2026-04-02)
 
 - **HomeKit fix**: FanControl cluster now added directly to the thermostat endpoint instead of as a child device, so the device appears as a climate card (not a fan card) in HomeKit.

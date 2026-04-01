@@ -1,6 +1,6 @@
 {
   "title": "AC Freedom",
-  "description": "matterbridge-ac-freedom v. 1.0.6 by https://github.com/azadaydinli",
+  "description": "matterbridge-ac-freedom v. 1.0.7 by https://github.com/azadaydinli",
   "type": "object",
   "properties": {
     "name": {
@@ -73,17 +73,11 @@
             ],
             "default": 0.5
           },
-          "features": {
-            "title": "Features",
-            "type": "object",
-            "properties": {
-              "showExtras": {
-                "title": "Extra Controls",
-                "description": "Enable fan speed control and sleep mode switch",
-                "type": "boolean",
-                "default": false
-              }
-            }
+          "showExtras": {
+            "title": "Extra Controls",
+            "description": "Enable fan speed control and sleep mode switch",
+            "type": "boolean",
+            "default": false
           }
         }
       }
@@ -118,17 +112,11 @@
             ],
             "default": 0.5
           },
-          "features": {
-            "title": "Features",
-            "type": "object",
-            "properties": {
-              "showExtras": {
-                "title": "Extra Controls",
-                "description": "Enable fan speed control and sleep mode switch",
-                "type": "boolean",
-                "default": false
-              }
-            }
+          "showExtras": {
+            "title": "Extra Controls",
+            "description": "Enable fan speed control and sleep mode switch",
+            "type": "boolean",
+            "default": false
           }
         }
       }

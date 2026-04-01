@@ -2,12 +2,13 @@
  * Matterbridge AC Freedom Plugin
  *
  * Exposes AUX air conditioners as composed Matter devices:
- * - Thermostat (main endpoint: heat/cool/auto + temperature + fan control)
- * - On/Off switches (child endpoints: sleep mode, display)
+ * - Thermostat (main endpoint: heat/cool/auto + temperature control)
+ * - Fan (child endpoint: speed control, optional via showExtras)
+ * - Sleep Mode switch (child endpoint: on/off, optional via showExtras)
  *
- * FanControl cluster is added directly to the thermostat endpoint
- * so HomeKit shows the device as a climate card (not a fan card).
- * Switches are child endpoints grouped under the thermostat.
+ * The thermostat is the main device type; fan and sleep are child
+ * endpoints grouped under it. HomeKit shows the thermostat as a
+ * climate card with child accessories inside.
  *
  * Supports both cloud and local (Broadlink UDP) connections.
  */
@@ -18,6 +19,7 @@ import {
   MatterbridgeEndpoint,
   PlatformConfig,
   thermostatDevice,
+  fanDevice,
   onOffSwitch,
 } from 'matterbridge';
 import { Thermostat, FanControl } from 'matterbridge/matter/clusters';
@@ -44,17 +46,13 @@ const CLOUD_MODE = { AUTO: 4, COOL: 0, HEAT: 1, DRY: 2, FAN: 3 };
 // Fan speed values
 const FAN_SPEED = { AUTO: 0, LOW: 1, MEDIUM: 2, HIGH: 3, TURBO: 4, MUTE: 5 };
 
-interface FeaturesConfig {
-  showExtras?: boolean;
-}
-
 interface CloudDeviceConfig {
   name: string;
   email: string;
   password: string;
   region?: string;
   deviceId?: string;
-  features?: FeaturesConfig;
+  showExtras?: boolean;
   tempStep?: number;
 }
 
@@ -62,7 +60,7 @@ interface LocalDeviceConfig {
   name: string;
   ip: string;
   mac: string;
-  features?: FeaturesConfig;
+  showExtras?: boolean;
   tempStep?: number;
 }
 
@@ -103,7 +101,7 @@ interface ManagedDevice {
   deviceApi: DeviceApi;
   state: AcState;
   thermostat: MatterbridgeEndpoint;
-  hasFan: boolean;
+  fan?: MatterbridgeEndpoint;
   switches: Map<string, MatterbridgeEndpoint>;
   pollTimer?: ReturnType<typeof setInterval>;
 }
@@ -173,7 +171,7 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
         cloudPassword: cd.password,
         cloudRegion: cd.region,
         cloudDeviceId: cd.deviceId,
-        showExtras: cd.features?.showExtras,
+        showExtras: cd.showExtras,
         tempStep: cd.tempStep,
       };
       try {
@@ -191,7 +189,7 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
         connection: 'local',
         localIp: ld.ip,
         localMac: ld.mac,
-        showExtras: ld.features?.showExtras,
+        showExtras: ld.showExtras,
         tempStep: ld.tempStep,
       };
       try {
@@ -229,14 +227,10 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       deviceApi,
       state,
       thermostat: undefined!,
-      hasFan: false,
       switches: new Map(),
     };
 
-    // Create composed device: thermostat is the main endpoint,
-    // fan control is on the thermostat, switches are child endpoints.
     await this.createComposedDevice(managed);
-
     this.managedDevices.push(managed);
   }
 
@@ -329,23 +323,27 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       )
       .addRequiredClusterServers();
 
-    // Add FanControl cluster directly to thermostat endpoint (not as child)
-    // and Sleep Mode switch as child endpoint — both controlled by showExtras
+    // Extra controls: Fan (child endpoint) + Sleep Mode (child endpoint)
     if (managed.config.showExtras === true) {
-      thermostat.createDefaultFanControlClusterServer(
-        FanControl.FanMode.Auto,
-        FanControl.FanModeSequence.OffLowMedHighAuto,
-        0,
-        0,
-      );
-      managed.hasFan = true;
+      // Fan child endpoint
+      const fanChild = thermostat.addChildDeviceType('Fan', [fanDevice]);
+      fanChild
+        .createDefaultFanControlClusterServer(
+          FanControl.FanMode.Auto,
+          FanControl.FanModeSequence.OffLowMedHighAuto,
+          0,
+          0,
+        )
+        .addRequiredClusterServers();
+      managed.fan = fanChild;
 
-      const sw = thermostat.addChildDeviceType('Sleep Mode', [onOffSwitch]);
-      sw.createOnOffClusterServer(false).addRequiredClusterServers();
-      managed.switches.set('sleep', sw);
+      // Sleep Mode child endpoint
+      const sleepSw = thermostat.addChildDeviceType('Sleep Mode', [onOffSwitch]);
+      sleepSw.createOnOffClusterServer(false).addRequiredClusterServers();
+      managed.switches.set('sleep', sleepSw);
     }
 
-    // Register the composed device (single registration for all)
+    // Register the composed device
     this.setSelectDevice(serialNumber, name);
     const selected = this.validateDevice([name, serialNumber]);
     if (selected) await this.registerDevice(thermostat);
@@ -356,7 +354,7 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
   // ── Attribute Subscriptions (Matter → Device) ──────────────────
 
   private async subscribeDeviceAttributes(managed: ManagedDevice): Promise<void> {
-    const { thermostat, switches } = managed;
+    const { thermostat, fan, switches } = managed;
 
     // Thermostat: systemMode
     await thermostat.subscribeAttribute(
@@ -406,9 +404,9 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       },
     );
 
-    // FanControl on thermostat endpoint
-    if (managed.hasFan) {
-      await thermostat.subscribeAttribute(
+    // Fan child endpoint
+    if (fan) {
+      await fan.subscribeAttribute(
         'FanControl',
         'fanMode',
         (newValue: unknown) => {
@@ -420,7 +418,7 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
         },
       );
 
-      await thermostat.subscribeAttribute(
+      await fan.subscribeAttribute(
         'FanControl',
         'percentSetting',
         (newValue: unknown) => {
@@ -511,7 +509,7 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
   }
 
   private async updateMatterAttributes(managed: ManagedDevice): Promise<void> {
-    const { thermostat, switches, state } = managed;
+    const { thermostat, fan, switches, state } = managed;
 
     // Thermostat systemMode
     let systemMode: Thermostat.SystemMode;
@@ -555,13 +553,13 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
     await thermostat.updateAttribute('Thermostat', 'occupiedCoolingSetpoint', Math.round(state.targetTemp * 100), this.log);
     await thermostat.updateAttribute('Thermostat', 'occupiedHeatingSetpoint', Math.round(state.targetTemp * 100), this.log);
 
-    // FanControl on thermostat endpoint
-    if (managed.hasFan) {
+    // Fan child endpoint
+    if (fan) {
       const fanMode = this.acFanSpeedToMatterFanMode(state.fanSpeed);
       const percent = this.fanSpeedToPercent(state.fanSpeed);
-      await thermostat.updateAttribute('FanControl', 'fanMode', fanMode, this.log);
-      await thermostat.updateAttribute('FanControl', 'percentSetting', percent, this.log);
-      await thermostat.updateAttribute('FanControl', 'percentCurrent', percent, this.log);
+      await fan.updateAttribute('FanControl', 'fanMode', fanMode, this.log);
+      await fan.updateAttribute('FanControl', 'percentSetting', percent, this.log);
+      await fan.updateAttribute('FanControl', 'percentCurrent', percent, this.log);
     }
 
     // Sleep Mode switch (child endpoint)
