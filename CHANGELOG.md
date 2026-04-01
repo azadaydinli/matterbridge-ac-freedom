@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.9 (2026-04-02)
+
+- **Restored v1.0.2 composed device pattern**: Fan and Sleep Mode are child endpoints under the thermostat (same approach that worked in v1.0.2). When `showExtras` is ON, fan speed control + sleep mode switch appear inside the climate card. When OFF, only the thermostat is shown.
+- **Sleep mode restored**: Sleep Mode switch is back as a child endpoint.
+
 ## 1.0.8 (2026-04-02)
 
 - **HomeKit climate card fix**: Removed ALL child endpoints (no fanDevice, no onOffSwitch). FanControl cluster is added directly to the thermostat endpoint BEFORE `addRequiredClusterServers()` — this was the critical ordering fix. Device is now a pure thermostat with no children, ensuring HomeKit shows it as a climate card.
