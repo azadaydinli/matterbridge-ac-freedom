@@ -1,6 +1,6 @@
 {
   "title": "AC Freedom",
-  "description": "matterbridge-ac-freedom v. 1.0.7 by https://github.com/azadaydinli",
+  "description": "matterbridge-ac-freedom v. 1.0.8 by https://github.com/azadaydinli",
   "type": "object",
   "properties": {
     "name": {
@@ -75,7 +75,7 @@
           },
           "showExtras": {
             "title": "Extra Controls",
-            "description": "Enable fan speed control and sleep mode switch",
+            "description": "Enable fan speed control on the thermostat",
             "type": "boolean",
             "default": false
           }
@@ -114,7 +114,7 @@
           },
           "showExtras": {
             "title": "Extra Controls",
-            "description": "Enable fan speed control and sleep mode switch",
+            "description": "Enable fan speed control on the thermostat",
             "type": "boolean",
             "default": false
           }

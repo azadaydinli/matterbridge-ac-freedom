@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.8 (2026-04-02)
+
+- **HomeKit climate card fix**: Removed ALL child endpoints (no fanDevice, no onOffSwitch). FanControl cluster is added directly to the thermostat endpoint BEFORE `addRequiredClusterServers()` — this was the critical ordering fix. Device is now a pure thermostat with no children, ensuring HomeKit shows it as a climate card.
+- **Removed sleep mode**: Sleep mode switch removed to eliminate child endpoints that could cause HomeKit to show wrong device type.
+- **showExtras**: Now controls only fan speed control on the thermostat.
+
 ## 1.0.7 (2026-04-02)
 
 - **HomeKit fix**: Reverted fan to child endpoint with `fanDevice` (FanControl on thermostat endpoint was not supported). Thermostat remains the main device type — should display as climate card.
