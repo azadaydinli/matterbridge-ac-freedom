@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.5 (2026-04-01)
+
+- **Simplified features**: Removed ComfWind, Health/Ionizer, Eco/Mildew, and Self Clean. Only Fan Control, Display Switch, and Sleep Mode remain as optional features.
+- **Merged config sections**: "Preset Modes" removed; all optional features now under a single "Features" heading.
+
 ## 1.0.2 (2026-04-01)
 
 - **Composed device**: Fan and switches are now child endpoints of the thermostat, so all controls appear under a single device in Apple Home, Google Home, etc.

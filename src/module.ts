@@ -4,7 +4,7 @@
  * Exposes AUX air conditioners as composed Matter devices:
  * - Thermostat (main endpoint: heat/cool/auto + temperature control)
  * - Fan (child endpoint: speed control)
- * - On/Off switches (child endpoints: sleep, health, eco, clean, comfortable wind, display)
+ * - On/Off switches (child endpoints: sleep mode, display)
  *
  * All child endpoints are grouped under the thermostat so they appear
  * as a single device in Apple Home, Google Home, etc.
@@ -37,10 +37,6 @@ const CLOUD = {
   SWING_V: 'ac_vdir',
   SWING_H: 'ac_hdir',
   SLEEP: 'ac_slp',
-  HEALTH: 'ac_health',
-  ECO: 'mldprf',
-  CLEAN: 'ac_clean',
-  COMFWIND: 'comfwind',
   DISPLAY: 'scrdisp',
 };
 
@@ -52,15 +48,8 @@ const FAN_SPEED = { AUTO: 0, LOW: 1, MEDIUM: 2, HIGH: 3, TURBO: 4, MUTE: 5 };
 
 interface FeaturesConfig {
   showFan?: boolean;
-  showComfWind?: boolean;
   showDisplay?: boolean;
-}
-
-interface PresetsConfig {
-  sleep?: boolean;
-  health?: boolean;
-  eco?: boolean;
-  clean?: boolean;
+  showSleep?: boolean;
 }
 
 interface CloudDeviceConfig {
@@ -70,7 +59,6 @@ interface CloudDeviceConfig {
   region?: string;
   deviceId?: string;
   features?: FeaturesConfig;
-  presets?: PresetsConfig;
   tempStep?: number;
 }
 
@@ -79,7 +67,6 @@ interface LocalDeviceConfig {
   ip: string;
   mac: string;
   features?: FeaturesConfig;
-  presets?: PresetsConfig;
   tempStep?: number;
 }
 
@@ -93,13 +80,9 @@ interface DeviceConfig {
   cloudDeviceId?: string;
   localIp?: string;
   localMac?: string;
-  presetSleep?: boolean;
-  presetHealth?: boolean;
-  presetEco?: boolean;
-  presetClean?: boolean;
   showFan?: boolean;
-  showComfWind?: boolean;
   showDisplay?: boolean;
+  showSleep?: boolean;
   tempStep?: number;
 }
 
@@ -119,10 +102,6 @@ interface AcState {
   swingV: boolean;
   swingH: boolean;
   sleep: boolean;
-  health: boolean;
-  eco: boolean;
-  clean: boolean;
-  comfwind: boolean;
   display: boolean;
 }
 
@@ -135,13 +114,6 @@ interface ManagedDevice {
   switches: Map<string, MatterbridgeEndpoint>;
   pollTimer?: ReturnType<typeof setInterval>;
 }
-
-const PRESET_DEFS: Array<{ key: string; label: string; cloudKey: string; localAttr: string }> = [
-  { key: 'sleep', label: 'Sleep Mode', cloudKey: CLOUD.SLEEP, localAttr: 'sleep' },
-  { key: 'health', label: 'Health', cloudKey: CLOUD.HEALTH, localAttr: 'health' },
-  { key: 'eco', label: 'Eco', cloudKey: CLOUD.ECO, localAttr: 'mildew' },
-  { key: 'clean', label: 'Clean', cloudKey: CLOUD.CLEAN, localAttr: 'clean' },
-];
 
 export default function initializePlugin(matterbridge: Matterbridge, log: AnsiLogger, config: PlatformConfig): AcFreedomPlatform {
   return new AcFreedomPlatform(matterbridge, log, config);
@@ -208,13 +180,9 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
         cloudPassword: cd.password,
         cloudRegion: cd.region,
         cloudDeviceId: cd.deviceId,
-        presetSleep: cd.presets?.sleep,
-        presetHealth: cd.presets?.health,
-        presetEco: cd.presets?.eco,
-        presetClean: cd.presets?.clean,
         showFan: cd.features?.showFan,
-        showComfWind: cd.features?.showComfWind,
         showDisplay: cd.features?.showDisplay,
+        showSleep: cd.features?.showSleep,
         tempStep: cd.tempStep,
       };
       try {
@@ -232,13 +200,9 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
         connection: 'local',
         localIp: ld.ip,
         localMac: ld.mac,
-        presetSleep: ld.presets?.sleep,
-        presetHealth: ld.presets?.health,
-        presetEco: ld.presets?.eco,
-        presetClean: ld.presets?.clean,
         showFan: ld.features?.showFan,
-        showComfWind: ld.features?.showComfWind,
         showDisplay: ld.features?.showDisplay,
+        showSleep: ld.features?.showSleep,
         tempStep: ld.tempStep,
       };
       try {
@@ -269,10 +233,6 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       swingV: false,
       swingH: false,
       sleep: false,
-      health: false,
-      eco: false,
-      clean: false,
-      comfwind: false,
       display: true,
     };
 
@@ -381,7 +341,7 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       .addRequiredClusterServers();
 
     // Add Fan as a child endpoint
-    if (managed.config.showFan !== false) {
+    if (managed.config.showFan === true) {
       const fanChild = thermostat.addChildDeviceType('Fan', [fanDevice]);
       fanChild
         .createDefaultFanControlClusterServer(
@@ -394,26 +354,11 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       managed.fan = fanChild;
     }
 
-    // Add preset switches as child endpoints
-    const presets: Record<string, boolean> = {
-      sleep: managed.config.presetSleep === true,
-      health: managed.config.presetHealth === true,
-      eco: managed.config.presetEco === true,
-      clean: managed.config.presetClean === true,
-    };
-
-    for (const def of PRESET_DEFS) {
-      if (!presets[def.key]) continue;
-      const sw = thermostat.addChildDeviceType(def.label, [onOffSwitch]);
+    // Sleep Mode switch
+    if (managed.config.showSleep === true) {
+      const sw = thermostat.addChildDeviceType('Sleep Mode', [onOffSwitch]);
       sw.createOnOffClusterServer(false).addRequiredClusterServers();
-      managed.switches.set(def.key, sw);
-    }
-
-    // Comfortable Wind switch
-    if (managed.config.showComfWind === true) {
-      const sw = thermostat.addChildDeviceType('Comfortable Wind', [onOffSwitch]);
-      sw.createOnOffClusterServer(false).addRequiredClusterServers();
-      managed.switches.set('comfwind', sw);
+      managed.switches.set('sleep', sw);
     }
 
     // Display switch
@@ -511,40 +456,15 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       );
     }
 
-    // Preset switches
-    for (const def of PRESET_DEFS) {
-      const sw = switches.get(def.key);
-      if (!sw) continue;
-      const presetKey = def.key;
-      await sw.subscribeAttribute(
+    // Sleep Mode switch
+    const sleepSw = switches.get('sleep');
+    if (sleepSw) {
+      await sleepSw.subscribeAttribute(
         'OnOff',
         'onOff',
         (newValue: unknown) => {
-          const on = newValue as boolean;
-          this.log.info(`Preset ${presetKey} changed to: ${on}`);
-          if (on) {
-            for (const otherDef of PRESET_DEFS) {
-              if (otherDef.key !== presetKey) {
-                managed.state[otherDef.key] = false;
-              }
-            }
-          }
-          managed.state[presetKey] = on;
-          this.sendPreset(managed, presetKey, on).catch(e => this.log.warn(`sendPreset failed: ${e}`));
-          if (on) this.refreshPresetSwitches(managed, presetKey);
-        },
-      );
-    }
-
-    // Comfortable Wind switch
-    const comfWindSw = switches.get('comfwind');
-    if (comfWindSw) {
-      await comfWindSw.subscribeAttribute(
-        'OnOff',
-        'onOff',
-        (newValue: unknown) => {
-          managed.state.comfwind = newValue as boolean;
-          this.sendComfWind(managed, newValue as boolean).catch(e => this.log.warn(`sendComfWind failed: ${e}`));
+          managed.state.sleep = newValue as boolean;
+          this.sendSleep(managed, newValue as boolean).catch(e => this.log.warn(`sendSleep failed: ${e}`));
         },
       );
     }
@@ -598,10 +518,6 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       managed.state.swingV = !!params[CLOUD.SWING_V];
       managed.state.swingH = !!params[CLOUD.SWING_H];
       managed.state.sleep = !!params[CLOUD.SLEEP];
-      managed.state.health = !!params[CLOUD.HEALTH];
-      managed.state.eco = !!params[CLOUD.ECO];
-      managed.state.clean = !!params[CLOUD.CLEAN];
-      managed.state.comfwind = !!params[CLOUD.COMFWIND];
       managed.state.display = !!params[CLOUD.DISPLAY];
     } catch (err) {
       const msg = (err as Error).message || '';
@@ -626,9 +542,6 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
     managed.state.swingV = s.verticalFixation === 7;
     managed.state.swingH = s.horizontalFixation === 7;
     managed.state.sleep = !!s.sleep;
-    managed.state.health = !!s.health;
-    managed.state.eco = !!s.mildew;
-    managed.state.clean = !!s.clean;
     managed.state.display = !!s.display;
 
     const modeMap: Record<number, number> = { 1: CLOUD_MODE.COOL, 2: CLOUD_MODE.DRY, 4: CLOUD_MODE.HEAT, 6: CLOUD_MODE.FAN, 8: CLOUD_MODE.AUTO };
@@ -689,34 +602,16 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       await fan.updateAttribute('FanControl', 'percentCurrent', percent, this.log);
     }
 
-    // Preset switches (child endpoints)
-    for (const def of PRESET_DEFS) {
-      const sw = switches.get(def.key);
-      if (sw) {
-        await sw.updateAttribute('OnOff', 'onOff', state[def.key] as boolean, this.log);
-      }
-    }
-
-    // ComfWind switch
-    const comfWindSw = switches.get('comfwind');
-    if (comfWindSw) {
-      await comfWindSw.updateAttribute('OnOff', 'onOff', state.comfwind, this.log);
+    // Sleep Mode switch
+    const sleepSw = switches.get('sleep');
+    if (sleepSw) {
+      await sleepSw.updateAttribute('OnOff', 'onOff', state.sleep, this.log);
     }
 
     // Display switch
     const displaySw = switches.get('display');
     if (displaySw) {
       await displaySw.updateAttribute('OnOff', 'onOff', state.display, this.log);
-    }
-  }
-
-  private async refreshPresetSwitches(managed: ManagedDevice, exceptKey: string): Promise<void> {
-    for (const def of PRESET_DEFS) {
-      if (def.key === exceptKey) continue;
-      const sw = managed.switches.get(def.key);
-      if (sw) {
-        await sw.updateAttribute('OnOff', 'onOff', false, this.log);
-      }
     }
   }
 
@@ -806,36 +701,12 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
     }
   }
 
-  private async sendPreset(managed: ManagedDevice, key: string, on: boolean): Promise<void> {
-    const def = PRESET_DEFS.find(d => d.key === key);
-    if (!def) return;
-
+  private async sendSleep(managed: ManagedDevice, on: boolean): Promise<void> {
     if (managed.deviceApi.type === 'cloud') {
-      const update: Record<string, number> = {
-        [CLOUD.SLEEP]: 0,
-        [CLOUD.HEALTH]: 0,
-        [CLOUD.ECO]: 0,
-        [CLOUD.CLEAN]: 0,
-      };
-      if (on) update[def.cloudKey] = 1;
-      await this.cloudSet(managed, update);
+      await this.cloudSet(managed, { [CLOUD.SLEEP]: on ? 1 : 0 });
     } else {
       const api = managed.deviceApi.api as BroadlinkAcApi;
-      api.state.sleep = 0;
-      api.state.health = 0;
-      api.state.mildew = 0;
-      api.state.clean = 0;
-      if (on) (api.state as unknown as Record<string, number>)[def.localAttr] = 1;
-      await api.setState();
-    }
-  }
-
-  private async sendComfWind(managed: ManagedDevice, on: boolean): Promise<void> {
-    if (managed.deviceApi.type === 'cloud') {
-      await this.cloudSet(managed, { [CLOUD.COMFWIND]: on ? 1 : 0 });
-    } else {
-      const api = managed.deviceApi.api as BroadlinkAcApi;
-      (api.state as unknown as Record<string, number>).comfwind = on ? 1 : 0;
+      api.state.sleep = on ? 1 : 0;
       await api.setState();
     }
   }

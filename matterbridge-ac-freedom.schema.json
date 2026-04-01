@@ -1,6 +1,6 @@
 {
   "title": "AC Freedom",
-  "description": "matterbridge-ac-freedom v. 1.0.4 by https://github.com/azadaydinli",
+  "description": "matterbridge-ac-freedom v. 1.0.5 by https://github.com/azadaydinli",
   "type": "object",
   "properties": {
     "name": {
@@ -72,42 +72,15 @@
               "showFan": {
                 "title": "Fan Control",
                 "type": "boolean",
-                "default": true
-              },
-              "showComfWind": {
-                "title": "Comfortable Wind",
-                "type": "boolean",
                 "default": false
               },
               "showDisplay": {
                 "title": "Display Switch",
                 "type": "boolean",
                 "default": false
-              }
-            }
-          },
-          "presets": {
-            "title": "Preset Modes",
-            "description": "Preset mode switches to expose",
-            "type": "object",
-            "properties": {
-              "sleep": {
-                "title": "Sleep",
-                "type": "boolean",
-                "default": false
               },
-              "health": {
-                "title": "Health / Ionizer",
-                "type": "boolean",
-                "default": false
-              },
-              "eco": {
-                "title": "Eco / Mildew",
-                "type": "boolean",
-                "default": false
-              },
-              "clean": {
-                "title": "Self Clean",
+              "showSleep": {
+                "title": "Sleep Mode",
                 "type": "boolean",
                 "default": false
               }
@@ -154,42 +127,15 @@
               "showFan": {
                 "title": "Fan Control",
                 "type": "boolean",
-                "default": true
-              },
-              "showComfWind": {
-                "title": "Comfortable Wind",
-                "type": "boolean",
                 "default": false
               },
               "showDisplay": {
                 "title": "Display Switch",
                 "type": "boolean",
                 "default": false
-              }
-            }
-          },
-          "presets": {
-            "title": "Preset Modes",
-            "description": "Preset mode switches to expose",
-            "type": "object",
-            "properties": {
-              "sleep": {
-                "title": "Sleep",
-                "type": "boolean",
-                "default": false
               },
-              "health": {
-                "title": "Health / Ionizer",
-                "type": "boolean",
-                "default": false
-              },
-              "eco": {
-                "title": "Eco / Mildew",
-                "type": "boolean",
-                "default": false
-              },
-              "clean": {
-                "title": "Self Clean",
+              "showSleep": {
+                "title": "Sleep Mode",
                 "type": "boolean",
                 "default": false
               }
