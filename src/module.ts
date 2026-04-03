@@ -3,11 +3,12 @@
  *
  * Exposes AUX air conditioners as composed Matter devices:
  * - Thermostat (main endpoint: heat/cool/auto + temperature control)
- * - Fan (child endpoint: speed control, optional via showExtras)
- * - Sleep Mode switch (child endpoint: on/off, optional via showExtras)
+ * - Fan (child endpoint: speed control)
+ * - Sleep Mode switch (child endpoint: on/off)
  *
- * All child endpoints are grouped under the thermostat so they appear
- * as a single climate card in Apple Home, Google Home, etc.
+ * Fan and Sleep Mode children are ALWAYS created to ensure HomeKit
+ * shows the device as a climate card. The showExtras config controls
+ * whether their attributes are actively synced with the AC.
  *
  * Supports both cloud and local (Broadlink UDP) connections.
  */
@@ -99,9 +100,10 @@ interface ManagedDevice {
   deviceApi: DeviceApi;
   state: AcState;
   thermostat: MatterbridgeEndpoint;
-  fan?: MatterbridgeEndpoint;
-  sleepSwitch?: MatterbridgeEndpoint;
+  fan: MatterbridgeEndpoint;
+  sleepSwitch: MatterbridgeEndpoint;
   pollTimer?: ReturnType<typeof setInterval>;
+  tempDebounce?: ReturnType<typeof setTimeout>;
 }
 
 export default function initializePlugin(matterbridge: Matterbridge, log: AnsiLogger, config: PlatformConfig): AcFreedomPlatform {
@@ -150,6 +152,7 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
 
     for (const managed of this.managedDevices) {
       if (managed.pollTimer) clearInterval(managed.pollTimer);
+      if (managed.tempDebounce) clearTimeout(managed.tempDebounce);
     }
     this.managedDevices = [];
 
@@ -223,6 +226,8 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       deviceApi,
       state,
       thermostat: undefined!,
+      fan: undefined!,
+      sleepSwitch: undefined!,
     };
 
     await this.createComposedDevice(managed);
@@ -286,7 +291,9 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
     }
   }
 
-  // ── Composed Device Creation (same pattern as v1.0.2) ──────────
+  // ── Composed Device Creation ───────────────────────────────────
+  // Fan and Sleep children are ALWAYS created (like v1.0.2) so that
+  // HomeKit always registers the device as a climate card.
 
   private async createComposedDevice(managed: ManagedDevice): Promise<void> {
     const name = managed.config.name || 'AUX AC';
@@ -318,25 +325,22 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       )
       .addRequiredClusterServers();
 
-    // Extra controls as child endpoints (same approach as v1.0.2)
-    if (managed.config.showExtras === true) {
-      // Fan child endpoint
-      const fanChild = thermostat.addChildDeviceType('Fan', [fanDevice]);
-      fanChild
-        .createDefaultFanControlClusterServer(
-          FanControl.FanMode.Auto,
-          FanControl.FanModeSequence.OffLowMedHighAuto,
-          0,
-          0,
-        )
-        .addRequiredClusterServers();
-      managed.fan = fanChild;
+    // Fan child endpoint (always created)
+    const fanChild = thermostat.addChildDeviceType('Fan', [fanDevice]);
+    fanChild
+      .createDefaultFanControlClusterServer(
+        FanControl.FanMode.Auto,
+        FanControl.FanModeSequence.OffLowMedHighAuto,
+        0,
+        0,
+      )
+      .addRequiredClusterServers();
+    managed.fan = fanChild;
 
-      // Sleep Mode child endpoint
-      const sleepChild = thermostat.addChildDeviceType('Sleep Mode', [onOffSwitch]);
-      sleepChild.createOnOffClusterServer(false).addRequiredClusterServers();
-      managed.sleepSwitch = sleepChild;
-    }
+    // Sleep Mode child endpoint (always created)
+    const sleepChild = thermostat.addChildDeviceType('Sleep Mode', [onOffSwitch]);
+    sleepChild.createOnOffClusterServer(false).addRequiredClusterServers();
+    managed.sleepSwitch = sleepChild;
 
     // Register the composed device
     this.setSelectDevice(serialNumber, name);
@@ -375,7 +379,7 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       },
     );
 
-    // Thermostat: occupiedCoolingSetpoint
+    // Thermostat: occupiedCoolingSetpoint (debounced)
     await thermostat.subscribeAttribute(
       'Thermostat',
       'occupiedCoolingSetpoint',
@@ -383,18 +387,13 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
         const temp = (newValue as number) / 100;
         const step = managed.config.tempStep || 0.5;
         const rounded = Math.round(temp / step) * step;
-        this.log.info(`Cooling setpoint changed to: ${temp}°C (rounded to ${rounded}°C, step=${step})`);
+        this.log.info(`Cooling setpoint: ${temp}°C → ${rounded}°C (step=${step})`);
         managed.state.targetTemp = rounded;
-        this.sendTemperature(managed, rounded).catch(e => this.log.warn(`sendTemperature failed: ${e}`));
-        // Update Matter attribute to reflect rounded value
-        if (rounded !== temp) {
-          thermostat.updateAttribute('Thermostat', 'occupiedCoolingSetpoint', Math.round(rounded * 100), this.log).catch(() => {});
-          thermostat.updateAttribute('Thermostat', 'occupiedHeatingSetpoint', Math.round(rounded * 100), this.log).catch(() => {});
-        }
+        this.debouncedSendTemp(managed);
       },
     );
 
-    // Thermostat: occupiedHeatingSetpoint
+    // Thermostat: occupiedHeatingSetpoint (debounced)
     await thermostat.subscribeAttribute(
       'Thermostat',
       'occupiedHeatingSetpoint',
@@ -402,19 +401,14 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
         const temp = (newValue as number) / 100;
         const step = managed.config.tempStep || 0.5;
         const rounded = Math.round(temp / step) * step;
-        this.log.info(`Heating setpoint changed to: ${temp}°C (rounded to ${rounded}°C, step=${step})`);
+        this.log.info(`Heating setpoint: ${temp}°C → ${rounded}°C (step=${step})`);
         managed.state.targetTemp = rounded;
-        this.sendTemperature(managed, rounded).catch(e => this.log.warn(`sendTemperature failed: ${e}`));
-        // Update Matter attribute to reflect rounded value
-        if (rounded !== temp) {
-          thermostat.updateAttribute('Thermostat', 'occupiedHeatingSetpoint', Math.round(rounded * 100), this.log).catch(() => {});
-          thermostat.updateAttribute('Thermostat', 'occupiedCoolingSetpoint', Math.round(rounded * 100), this.log).catch(() => {});
-        }
+        this.debouncedSendTemp(managed);
       },
     );
 
-    // Fan child endpoint
-    if (fan) {
+    // Fan + Sleep subscriptions only when showExtras is ON
+    if (managed.config.showExtras === true) {
       await fan.subscribeAttribute(
         'FanControl',
         'fanMode',
@@ -438,10 +432,7 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
           this.sendFanSpeed(managed, speed).catch(e => this.log.warn(`sendFanSpeed failed: ${e}`));
         },
       );
-    }
 
-    // Sleep Mode child endpoint
-    if (sleepSwitch) {
       await sleepSwitch.subscribeAttribute(
         'OnOff',
         'onOff',
@@ -451,6 +442,23 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
         },
       );
     }
+  }
+
+  // ── Temperature Debounce ───────────────────────────────────────
+  // HomeKit fires both cooling and heating setpoint callbacks + rounding
+  // can trigger additional updates. Debounce to send only ONE command.
+
+  private debouncedSendTemp(managed: ManagedDevice): void {
+    if (managed.tempDebounce) clearTimeout(managed.tempDebounce);
+    managed.tempDebounce = setTimeout(() => {
+      const temp = managed.state.targetTemp;
+      this.log.info(`Sending temperature: ${temp}°C`);
+      this.sendTemperature(managed, temp).catch(e => this.log.warn(`sendTemperature failed: ${e}`));
+      // Sync both setpoints to the rounded value
+      const val = Math.round(temp * 100);
+      managed.thermostat.updateAttribute('Thermostat', 'occupiedCoolingSetpoint', val, this.log).catch(() => {});
+      managed.thermostat.updateAttribute('Thermostat', 'occupiedHeatingSetpoint', val, this.log).catch(() => {});
+    }, 500);
   }
 
   // ── Polling (Device → Matter) ──────────────────────────────────
@@ -517,7 +525,7 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
   }
 
   private async updateMatterAttributes(managed: ManagedDevice): Promise<void> {
-    const { thermostat, fan, sleepSwitch, state } = managed;
+    const { thermostat, state } = managed;
 
     // Thermostat systemMode
     let systemMode: Thermostat.SystemMode;
@@ -561,18 +569,14 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
     await thermostat.updateAttribute('Thermostat', 'occupiedCoolingSetpoint', Math.round(state.targetTemp * 100), this.log);
     await thermostat.updateAttribute('Thermostat', 'occupiedHeatingSetpoint', Math.round(state.targetTemp * 100), this.log);
 
-    // Fan child endpoint
-    if (fan) {
+    // Fan + Sleep only updated when showExtras is ON
+    if (managed.config.showExtras === true) {
       const fanMode = this.acFanSpeedToMatterFanMode(state.fanSpeed);
       const percent = this.fanSpeedToPercent(state.fanSpeed);
-      await fan.updateAttribute('FanControl', 'fanMode', fanMode, this.log);
-      await fan.updateAttribute('FanControl', 'percentSetting', percent, this.log);
-      await fan.updateAttribute('FanControl', 'percentCurrent', percent, this.log);
-    }
-
-    // Sleep Mode child endpoint
-    if (sleepSwitch) {
-      await sleepSwitch.updateAttribute('OnOff', 'onOff', state.sleep, this.log);
+      await managed.fan.updateAttribute('FanControl', 'fanMode', fanMode, this.log);
+      await managed.fan.updateAttribute('FanControl', 'percentSetting', percent, this.log);
+      await managed.fan.updateAttribute('FanControl', 'percentCurrent', percent, this.log);
+      await managed.sleepSwitch.updateAttribute('OnOff', 'onOff', state.sleep, this.log);
     }
   }
 
@@ -641,14 +645,11 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
   }
 
   private async sendTemperature(managed: ManagedDevice, temp: number): Promise<void> {
-    // Round to tempStep (default 0.5)
-    const step = managed.config.tempStep || 0.5;
-    const rounded = Math.round(temp / step) * step;
     if (managed.deviceApi.type === 'cloud') {
-      await this.cloudSet(managed, { [CLOUD.TEMP_TARGET]: Math.round(rounded * 10) });
+      await this.cloudSet(managed, { [CLOUD.TEMP_TARGET]: Math.round(temp * 10) });
     } else {
       const api = managed.deviceApi.api as BroadlinkAcApi;
-      api.state.temperature = rounded;
+      api.state.temperature = temp;
       await api.setState();
     }
   }

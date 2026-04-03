@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.11 (2026-04-03)
+
+- **Fix multiple beeps**: Temperature commands are now debounced (500ms). HomeKit fires both cooling and heating setpoint callbacks simultaneously — debounce merges them into a single command to the AC.
+- **Fix first-config extras**: Fan and Sleep Mode child endpoints are now ALWAYS created (regardless of showExtras). This ensures HomeKit always registers the device as a climate card on first setup. The showExtras config only controls whether fan/sleep attributes are actively synced with the AC.
+
 ## 1.0.10 (2026-04-02)
 
 - **Temperature step fix**: `tempStep` config is now applied. When set to 1°C, temperatures are rounded to the nearest whole degree before sending to the AC. The rounded value is also written back to the Matter attribute so HomeKit UI reflects it (e.g. 24.5 → 25).
