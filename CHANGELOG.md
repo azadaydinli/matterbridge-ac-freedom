@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.12 (2026-04-03)
+
+- **Fix device not appearing**: Device is now registered in Matterbridge even if the initial API connection fails. The polling loop will retry the connection.
+- **Better logging**: Added discovery count, device registration, and connection failure messages to help diagnose issues.
+
 ## 1.0.11 (2026-04-03)
 
 - **Fix multiple beeps**: Temperature commands are now debounced (500ms). HomeKit fires both cooling and heating setpoint callbacks simultaneously — debounce merges them into a single command to the AC.

@@ -163,6 +163,9 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
 
   private async discoverDevices(): Promise<void> {
     const cloudDevices = (this.config.cloudDevices as CloudDeviceConfig[]) || [];
+    const localDevices = (this.config.localDevices as LocalDeviceConfig[]) || [];
+    this.log.info(`Discovering devices: ${cloudDevices.length} cloud, ${localDevices.length} local`);
+
     for (const cd of cloudDevices) {
       const unified: DeviceConfig = {
         name: cd.name,
@@ -181,7 +184,6 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       }
     }
 
-    const localDevices = (this.config.localDevices as LocalDeviceConfig[]) || [];
     for (const ld of localDevices) {
       const unified: DeviceConfig = {
         name: ld.name,
@@ -200,6 +202,8 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
   }
 
   private async setupDevice(deviceConfig: DeviceConfig): Promise<void> {
+    this.log.info(`Setting up ${deviceConfig.connection} device: ${deviceConfig.name}`);
+
     let deviceApi: DeviceApi | null = null;
 
     if (deviceConfig.connection === 'cloud') {
@@ -208,7 +212,16 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       deviceApi = await this.setupLocalDevice(deviceConfig);
     }
 
-    if (!deviceApi) return;
+    // Register the device in Matterbridge even if API connection fails.
+    // Polling will retry the connection later.
+    if (!deviceApi) {
+      this.log.warn(`API connection failed for ${deviceConfig.name}, registering device anyway`);
+      if (deviceConfig.connection === 'cloud') {
+        deviceApi = { type: 'cloud', api: new AuxCloudAPI(deviceConfig.cloudRegion || 'eu') };
+      } else {
+        deviceApi = { type: 'local', api: new BroadlinkAcApi(deviceConfig.localIp!, deviceConfig.localMac!) };
+      }
+    }
 
     const state: AcState = {
       power: false,
@@ -231,6 +244,7 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
     };
 
     await this.createComposedDevice(managed);
+    this.log.info(`Device registered: ${deviceConfig.name}`);
     this.managedDevices.push(managed);
   }
 
