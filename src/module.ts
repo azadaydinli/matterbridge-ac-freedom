@@ -54,7 +54,6 @@ interface CloudDeviceConfig {
   region?: string;
   deviceId?: string;
   showExtras?: boolean;
-  tempStep?: number;
 }
 
 interface LocalDeviceConfig {
@@ -62,7 +61,6 @@ interface LocalDeviceConfig {
   ip: string;
   mac: string;
   showExtras?: boolean;
-  tempStep?: number;
 }
 
 interface DeviceConfig {
@@ -75,8 +73,9 @@ interface DeviceConfig {
   localIp?: string;
   localMac?: string;
   showExtras: boolean;
-  tempStep: number;
 }
+
+const TEMP_STEP = 1; // Fixed 1°C step
 
 // ── Runtime State ────────────────────────────────────────────────
 
@@ -166,7 +165,6 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
         cloudRegion: c.region,
         cloudDeviceId: c.deviceId,
         showExtras: c.showExtras === true,
-        tempStep: c.tempStep || 0.5,
       });
     }
 
@@ -177,7 +175,6 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
         localIp: l.ip,
         localMac: l.mac,
         showExtras: l.showExtras === true,
-        tempStep: l.tempStep || 0.5,
       });
     }
   }
@@ -324,7 +321,7 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
     // Cooling setpoint (debounced)
     await thermostat.subscribeAttribute('Thermostat', 'occupiedCoolingSetpoint', (val: unknown) => {
       const temp = (val as number) / 100;
-      const rounded = this.roundTemp(temp, dev.config.tempStep);
+      const rounded = this.roundTemp(temp, TEMP_STEP);
       this.log.info(`coolSetpoint → ${temp}°C (rounded: ${rounded}°C)`);
       dev.state.targetTemp = rounded;
       this.debounceSendTemp(dev);
@@ -333,7 +330,7 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
     // Heating setpoint (debounced)
     await thermostat.subscribeAttribute('Thermostat', 'occupiedHeatingSetpoint', (val: unknown) => {
       const temp = (val as number) / 100;
-      const rounded = this.roundTemp(temp, dev.config.tempStep);
+      const rounded = this.roundTemp(temp, TEMP_STEP);
       this.log.info(`heatSetpoint → ${temp}°C (rounded: ${rounded}°C)`);
       dev.state.targetTemp = rounded;
       this.debounceSendTemp(dev);

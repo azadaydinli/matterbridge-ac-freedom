@@ -1,6 +1,6 @@
 {
   "title": "AC Freedom",
-  "description": "matterbridge-ac-freedom v. 2.0.0 by https://github.com/azadaydinli",
+  "description": "matterbridge-ac-freedom v. 2.0.1 by https://github.com/azadaydinli",
   "type": "object",
   "properties": {
     "name": {
@@ -64,13 +64,6 @@
             "description": "Leave empty to auto-detect",
             "type": "string"
           },
-          "tempStep": {
-            "title": "Temperature Step",
-            "description": "Temperature increment step (0.5°C or 1°C)",
-            "type": "number",
-            "enum": [0.5, 1],
-            "default": 0.5
-          },
           "showExtras": {
             "title": "Extra Controls",
             "description": "Add fan speed control and sleep mode switch",
@@ -100,13 +93,6 @@
             "title": "MAC Address",
             "description": "Format: AA:BB:CC:DD:EE:FF",
             "type": "string"
-          },
-          "tempStep": {
-            "title": "Temperature Step",
-            "description": "Temperature increment step (0.5°C or 1°C)",
-            "type": "number",
-            "enum": [0.5, 1],
-            "default": 0.5
           },
           "showExtras": {
             "title": "Extra Controls",
