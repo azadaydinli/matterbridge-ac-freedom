@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.7 (2026-05-03)
+
+- **Fan control: ModeSelect card**: Replaced `fanDevice` + FanControl cluster with `modeSelect` device type + ModeSelect cluster. HomeKit renders ModeSelect as a selectable mode card (Auto / Low / Medium / High), similar to the home mode selector card.
+
 ## 2.0.6 (2026-05-03)
 
 - **Fan control: mode picker instead of slider**: Switched from `MultiSpeed` (slider) back to `fanMode`-based control. HomeKit renders `fanMode` as a discrete mode picker card (Auto / Low / Medium / High).

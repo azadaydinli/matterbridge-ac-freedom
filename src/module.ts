@@ -22,10 +22,10 @@ import {
   MatterbridgeEndpoint,
   PlatformConfig,
   thermostatDevice,
-  fanDevice,
+  modeSelect,
   onOffSwitch,
 } from 'matterbridge';
-import { Thermostat, FanControl } from 'matterbridge/matter/clusters';
+import { Thermostat } from 'matterbridge/matter/clusters';
 import { AnsiLogger, LogLevel } from 'matterbridge/logger';
 
 import { AuxCloudAPI, CloudDevice } from './cloud-api.js';
@@ -254,11 +254,17 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
     let sleepChild: MatterbridgeEndpoint | undefined;
 
     if (cfg.showExtras) {
-      fanChild = thermostat.addChildDeviceType('Fan', fanDevice);
-      fanChild.createDefaultFanControlClusterServer(
-        FanControl.FanMode.Auto,
-        FanControl.FanModeSequence.OffLowMedHighAuto,
-        0, 0,
+      fanChild = thermostat.addChildDeviceType('Fan', modeSelect);
+      fanChild.createDefaultModeSelectClusterServer(
+        'Fan Speed',
+        [
+          { label: 'Auto',   mode: 0, semanticTags: [] },
+          { label: 'Low',    mode: 1, semanticTags: [] },
+          { label: 'Medium', mode: 2, semanticTags: [] },
+          { label: 'High',   mode: 3, semanticTags: [] },
+        ],
+        0, // currentMode = Auto
+        0, // startUpMode = Auto
       );
 
       sleepChild = thermostat.addChildDeviceType('Sleep', onOffSwitch);
@@ -327,11 +333,11 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       this.debounceSendTemp(dev);
     });
 
-    // Fan control (child endpoint) — discrete mode picker via fanMode
+    // Fan control (child endpoint) — ModeSelect mode picker
     if (fanChild) {
-      await fanChild.subscribeAttribute('FanControl', 'fanMode', (val: unknown) => {
-        const speed = this.fanModeToAc(val as FanControl.FanMode);
-        this.log.info(`fanMode → ${val} (ac speed: ${speed})`);
+      await fanChild.subscribeAttribute('ModeSelect', 'currentMode', (val: unknown) => {
+        const speed = this.modeToAcFan(val as number);
+        this.log.info(`fanMode currentMode → ${val} (ac speed: ${speed})`);
         dev.state.fanSpeed = speed;
         this.sendFanSpeed(dev, speed);
       });
@@ -467,9 +473,9 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
     await thermostat.updateAttribute('Thermostat', 'occupiedCoolingSetpoint', Math.round(state.targetTemp * 100), this.log);
     await thermostat.updateAttribute('Thermostat', 'occupiedHeatingSetpoint', Math.round(state.targetTemp * 100), this.log);
 
-    // Fan (child endpoint) — mode picker
+    // Fan (child endpoint) — ModeSelect mode picker
     if (fanChild) {
-      await fanChild.updateAttribute('FanControl', 'fanMode', this.acToFanMode(state.fanSpeed), this.log);
+      await fanChild.updateAttribute('ModeSelect', 'currentMode', this.acFanToMode(state.fanSpeed), this.log);
     }
 
     // Sleep (child endpoint)
@@ -478,25 +484,24 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
     }
   }
 
-  // ── Fan Mode Mapping ───────────────────────────────────────────
-  // HomeKit fanMode picker: Auto / Low / Medium / High
+  // ── Fan Mode Mapping (ModeSelect: 0=Auto, 1=Low, 2=Medium, 3=High) ──
 
-  private acToFanMode(speed: number): FanControl.FanMode {
+  private acFanToMode(speed: number): number {
     switch (speed) {
-      case FAN_SPEED.LOW:    return FanControl.FanMode.Low;
-      case FAN_SPEED.MEDIUM: return FanControl.FanMode.Medium;
+      case FAN_SPEED.LOW:    return 1;
+      case FAN_SPEED.MEDIUM: return 2;
       case FAN_SPEED.HIGH:
-      case FAN_SPEED.TURBO:  return FanControl.FanMode.High;
-      default:               return FanControl.FanMode.Auto;
+      case FAN_SPEED.TURBO:  return 3;
+      default:               return 0; // AUTO
     }
   }
 
-  private fanModeToAc(mode: FanControl.FanMode): number {
+  private modeToAcFan(mode: number): number {
     switch (mode) {
-      case FanControl.FanMode.Low:    return FAN_SPEED.LOW;
-      case FanControl.FanMode.Medium: return FAN_SPEED.MEDIUM;
-      case FanControl.FanMode.High:   return FAN_SPEED.HIGH;
-      default:                        return FAN_SPEED.AUTO;
+      case 1: return FAN_SPEED.LOW;
+      case 2: return FAN_SPEED.MEDIUM;
+      case 3: return FAN_SPEED.HIGH;
+      default: return FAN_SPEED.AUTO;
     }
   }
 

@@ -1,6 +1,6 @@
 {
   "name": "matterbridge-ac-freedom",
-  "version": "2.0.6",
+  "version": "2.0.7",
   "description": "Matterbridge plugin for AUX air conditioners - Cloud and Local control via Matter",
   "author": "Azad Aydinli",
   "license": "Apache-2.0",
