@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.3 (2026-05-03)
+
+- **Fix fan and sleep controls**: Fan speed and Sleep Mode are now added as child endpoints of the thermostat using `addChildDeviceType()`. This makes them appear inside the climate card in HomeKit, not as separate devices.
+- **Fix sleep switch**: Sleep Mode no longer registers as a separate switch tile — it is a child of the thermostat composed device.
+
 ## 2.0.2 (2026-05-03)
 
 - **Temperature step**: Changed fixed step from 1°C to 0.5°C.

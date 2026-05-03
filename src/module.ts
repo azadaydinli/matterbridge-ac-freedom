@@ -22,6 +22,7 @@ import {
   MatterbridgeEndpoint,
   PlatformConfig,
   thermostatDevice,
+  fanDevice,
   onOffSwitch,
 } from 'matterbridge';
 import { Thermostat, FanControl } from 'matterbridge/matter/clusters';
@@ -96,7 +97,8 @@ interface ManagedDevice {
   connected: boolean;
   state: AcState;
   thermostat: MatterbridgeEndpoint;
-  sleepSwitch?: MatterbridgeEndpoint;
+  fanChild?: MatterbridgeEndpoint;
+  sleepChild?: MatterbridgeEndpoint;
   pollTimer?: ReturnType<typeof setInterval>;
   tempDebounce?: ReturnType<typeof setTimeout>;
 }
@@ -233,13 +235,13 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       sleep: false,
     };
 
-    // ── Create thermostat endpoint (with FanControl) ──
+    // ── Create thermostat endpoint ──
     const thermostat = new MatterbridgeEndpoint(thermostatDevice, { uniqueStorageKey: `acf2-${serial}` });
     thermostat
       .createDefaultBridgedDeviceBasicInformationClusterServer(
         cfg.name || 'AUX AC', serial,
         this.matterbridge.aggregatorVendorId,
-        'AUX', 'AC Freedom', 10000, '2.0.0',
+        'AUX', 'AC Freedom', 10000, '2.0.2',
       )
       .createDefaultPowerSourceWiredClusterServer()
       .createDefaultThermostatClusterServer(
@@ -247,13 +249,13 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
         0, 16, 32, 16, 32,
       );
 
-    // Add FanControl cluster to thermostat BEFORE addRequiredClusterServers
+    // ── Add fan + sleep as child endpoints (composed device) ──
+    let fanChild: MatterbridgeEndpoint | undefined;
+    let sleepChild: MatterbridgeEndpoint | undefined;
+
     if (cfg.showExtras) {
-      thermostat.createDefaultFanControlClusterServer(
-        FanControl.FanMode.Auto,
-        FanControl.FanModeSequence.OffLowMedHighAuto,
-        0, 0,
-      );
+      fanChild = thermostat.addChildDeviceType('Fan', fanDevice, { uniqueStorageKey: `acf2-${serial}-fan` });
+      sleepChild = thermostat.addChildDeviceType('Sleep', onOffSwitch, { uniqueStorageKey: `acf2-${serial}-sleep` });
     }
 
     thermostat.addRequiredClusterServers();
@@ -261,25 +263,6 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
     this.setSelectDevice(serial, cfg.name);
     const selected = this.validateDevice([cfg.name, serial]);
     if (selected) await this.registerDevice(thermostat);
-
-    // ── Create separate sleep switch device (not a child) ──
-    let sleepSwitch: MatterbridgeEndpoint | undefined;
-    if (cfg.showExtras) {
-      const sleepSerial = `${serial}-sleep`;
-      sleepSwitch = new MatterbridgeEndpoint(onOffSwitch, { uniqueStorageKey: `acf2-${sleepSerial}` });
-      sleepSwitch
-        .createDefaultBridgedDeviceBasicInformationClusterServer(
-          `${cfg.name} Sleep`, sleepSerial,
-          this.matterbridge.aggregatorVendorId,
-          'AUX', 'AC Freedom', 10001, '2.0.0',
-        )
-        .createOnOffClusterServer(false)
-        .addRequiredClusterServers();
-
-      this.setSelectDevice(sleepSerial, `${cfg.name} Sleep`);
-      const sleepSelected = this.validateDevice([`${cfg.name} Sleep`, sleepSerial]);
-      if (sleepSelected) await this.registerDevice(sleepSwitch);
-    }
 
     const dev: ManagedDevice = {
       config: cfg,
@@ -289,7 +272,8 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       connected,
       state,
       thermostat,
-      sleepSwitch,
+      fanChild,
+      sleepChild,
     };
 
     this.devices.push(dev);
@@ -299,7 +283,7 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
   // ── Subscribe (Matter → AC) ────────────────────────────────────
 
   private async subscribe(dev: ManagedDevice): Promise<void> {
-    const { thermostat, sleepSwitch } = dev;
+    const { thermostat, fanChild, sleepChild } = dev;
 
     // System mode
     await thermostat.subscribeAttribute('Thermostat', 'systemMode', (val: unknown) => {
@@ -336,16 +320,16 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       this.debounceSendTemp(dev);
     });
 
-    // Fan control (on thermostat endpoint)
-    if (dev.config.showExtras) {
-      await thermostat.subscribeAttribute('FanControl', 'fanMode', (val: unknown) => {
+    // Fan control (child endpoint)
+    if (fanChild) {
+      await fanChild.subscribeAttribute('FanControl', 'fanMode', (val: unknown) => {
         const speed = this.matterFanToAc(val as FanControl.FanMode);
         this.log.info(`fanMode → ${val} (speed: ${speed})`);
         dev.state.fanSpeed = speed;
         this.sendFanSpeed(dev, speed);
       });
 
-      await thermostat.subscribeAttribute('FanControl', 'percentSetting', (val: unknown) => {
+      await fanChild.subscribeAttribute('FanControl', 'percentSetting', (val: unknown) => {
         const pct = (val as number | null) ?? 0;
         const speed = this.pctToFanSpeed(pct);
         this.log.info(`fanPercent → ${pct}% (speed: ${speed})`);
@@ -354,9 +338,9 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       });
     }
 
-    // Sleep switch (separate device)
-    if (sleepSwitch) {
-      await sleepSwitch.subscribeAttribute('OnOff', 'onOff', (val: unknown) => {
+    // Sleep switch (child endpoint)
+    if (sleepChild) {
+      await sleepChild.subscribeAttribute('OnOff', 'onOff', (val: unknown) => {
         dev.state.sleep = val as boolean;
         this.log.info(`sleep → ${val}`);
         this.sendSleep(dev, val as boolean);
@@ -448,7 +432,7 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
   }
 
   private async pushToMatter(dev: ManagedDevice): Promise<void> {
-    const { thermostat, sleepSwitch, state } = dev;
+    const { thermostat, fanChild, sleepChild, state } = dev;
 
     // System mode
     let sysMode: Thermostat.SystemMode;
@@ -484,17 +468,17 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
     await thermostat.updateAttribute('Thermostat', 'occupiedCoolingSetpoint', Math.round(state.targetTemp * 100), this.log);
     await thermostat.updateAttribute('Thermostat', 'occupiedHeatingSetpoint', Math.round(state.targetTemp * 100), this.log);
 
-    // Fan (on thermostat endpoint)
-    if (dev.config.showExtras) {
-      await thermostat.updateAttribute('FanControl', 'fanMode', this.acFanToMatter(state.fanSpeed), this.log);
+    // Fan (child endpoint)
+    if (fanChild) {
       const pct = this.fanSpeedToPct(state.fanSpeed);
-      await thermostat.updateAttribute('FanControl', 'percentSetting', pct, this.log);
-      await thermostat.updateAttribute('FanControl', 'percentCurrent', pct, this.log);
+      await fanChild.updateAttribute('FanControl', 'fanMode', this.acFanToMatter(state.fanSpeed), this.log);
+      await fanChild.updateAttribute('FanControl', 'percentSetting', pct, this.log);
+      await fanChild.updateAttribute('FanControl', 'percentCurrent', pct, this.log);
     }
 
-    // Sleep switch
-    if (sleepSwitch) {
-      await sleepSwitch.updateAttribute('OnOff', 'onOff', state.sleep, this.log);
+    // Sleep (child endpoint)
+    if (sleepChild) {
+      await sleepChild.updateAttribute('OnOff', 'onOff', state.sleep, this.log);
     }
   }
 
