@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.1.2 (2026-05-03)
+
+- **Fix new device categorised as switch when extras ON**: Fan and Sleep child endpoints are now added in `onConfigure` (after the thermostat is already registered as a climate card) instead of during `addDevice`. HomeKit commits to the climate-card category on first registration; children added afterwards appear inside the climate card without changing the category.
+
 ## 2.1.1 (2026-05-03)
 
 - **Fix fan Low/High swap**: AUX AC `ac_mark` parameter uses an inverted scale (`ac_mark=1` is fast/High, `ac_mark=3` is slow/Low). All fan mode mappings corrected accordingly.

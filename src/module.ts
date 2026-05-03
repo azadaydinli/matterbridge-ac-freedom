@@ -129,8 +129,24 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
 
   override async onConfigure(): Promise<void> {
     await super.onConfigure();
-    this.log.info('onConfigure: subscribing and starting polls');
+    this.log.info('onConfigure: adding extras, subscribing, starting polls');
     for (const dev of this.devices) {
+      // Add fan + sleep children HERE (after thermostat is registered as climate card)
+      if (dev.config.showExtras) {
+        dev.fanChild = dev.thermostat.addChildDeviceType('Fan', fanDevice);
+        dev.fanChild.createDefaultFanControlClusterServer(
+          FanControl.FanMode.Off,
+          FanControl.FanModeSequence.OffLowMedHighAuto,
+          0, 0,
+        );
+        dev.fanChild.addRequiredClusterServers();
+
+        dev.sleepChild = dev.thermostat.addChildDeviceType('Sleep', onOffSwitch);
+        dev.sleepChild.createOnOffClusterServer(false);
+        dev.sleepChild.addRequiredClusterServers();
+
+        this.log.info(`Extras added for "${dev.config.name}"`);
+      }
       await this.subscribe(dev);
       this.startPolling(dev);
     }
@@ -249,24 +265,6 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
         0, 16, 32, 16, 32,
       );
 
-    // ── Fan + Sleep as child endpoints (v2.0.4 pattern) ──
-    let fanChild: MatterbridgeEndpoint | undefined;
-    let sleepChild: MatterbridgeEndpoint | undefined;
-
-    if (cfg.showExtras) {
-      fanChild = thermostat.addChildDeviceType('Fan', fanDevice);
-      fanChild.createDefaultFanControlClusterServer(
-        FanControl.FanMode.Off,
-        FanControl.FanModeSequence.OffLowMedHighAuto,
-        0, 0,
-      );
-      fanChild.addRequiredClusterServers();
-
-      sleepChild = thermostat.addChildDeviceType('Sleep', onOffSwitch);
-      sleepChild.createOnOffClusterServer(false);
-      sleepChild.addRequiredClusterServers();
-    }
-
     thermostat.addRequiredClusterServers();
 
     this.setSelectDevice(serial, cfg.name);
@@ -281,8 +279,8 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       connected,
       state,
       thermostat,
-      fanChild,
-      sleepChild,
+      fanChild: undefined,
+      sleepChild: undefined,
     };
 
     this.devices.push(dev);
