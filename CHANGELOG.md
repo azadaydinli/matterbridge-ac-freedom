@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.1.4 (2026-05-03)
+
+- **Fix Region dropdown not selectable**: Changed `oneOf` schema format to plain `enum` array (`["eu", "usa", "cn", "rus"]`). Matterbridge UI does not render `oneOf` as a selectable dropdown (same root cause as the earlier tempStep issue).
+
 ## 2.1.3 (2026-05-03)
 
 - **Fix device always showing as climate card**: Changed storage key prefix to `acf3-` to force fresh HomeKit registration and clear any cached wrong category. Fan child endpoint (`fanDevice`) is now added in `addDevice` before `registerDevice` — HomeKit commits to the climate-card category at first registration. Sleep Mode switch removed from HomeKit UI: `onOffSwitch` child device type causes HomeKit to categorise the composed device as a switch tile on first registration, which cannot be reversed without a full re-registration.
