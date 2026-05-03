@@ -75,7 +75,7 @@ interface DeviceConfig {
   showExtras: boolean;
 }
 
-const TEMP_STEP = 1; // Fixed 1°C step
+const TEMP_STEP = 0.5; // Fixed 0.5°C step
 
 // ── Runtime State ────────────────────────────────────────────────
 

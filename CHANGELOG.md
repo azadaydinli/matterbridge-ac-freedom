@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.2 (2026-05-03)
+
+- **Temperature step**: Changed fixed step from 1°C to 0.5°C.
+
 ## 2.0.1 (2026-05-03)
 
 - **Remove tempStep config**: Temperature step is now fixed at 1°C. The dropdown was not rendering correctly in Matterbridge UI regardless of format.
