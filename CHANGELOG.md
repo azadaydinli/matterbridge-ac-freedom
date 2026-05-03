@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.9 (2026-05-03)
+
+- **Reverted to v2.0.4 architecture**: Fan and Sleep are child endpoints of the thermostat again (`fanDevice` + `onOffSwitch`).
+- **Fan mode sequence fixed**: Off=Auto → Low → Medium → High → Auto=Turbo. The `FanMode.Auto` position (fully open) maps to Turbo in the AC.
+
 ## 2.0.8 (2026-05-03)
 
 - **Fan and sleep as standalone bridged devices**: HomeKit does not render child endpoints of a thermostat composed device. Fan speed (modeSelect) and Sleep Mode (onOffSwitch) are now registered as independent bridged devices — they will appear as separate tiles in HomeKit but are guaranteed to be visible and functional.
