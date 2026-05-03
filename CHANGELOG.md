@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.0.0 (2026-05-03)
+
+- **Complete rewrite**: Fully redesigned plugin architecture for stability and correctness.
+- **HomeKit climate card guaranteed**: FanControl cluster is added directly to the thermostat endpoint (no fanDevice/onOffSwitch children). This ensures HomeKit always categorizes the device as a climate card regardless of configuration.
+- **Sleep mode as separate device**: When `showExtras` is ON, Sleep Mode appears as a separate bridged switch device (not a child endpoint), avoiding HomeKit categorization conflicts.
+- **Temperature step dropdown**: Fixed `tempStep` config to use a standard `enum` dropdown (0.5°C or 1°C) — the previous `oneOf` format was not selectable in some UI renderers.
+- **New storage keys**: All devices use `acf2-` key prefix to force clean registration, clearing any cached device structures from v1.x.
+- **Graceful connection failure**: Device is registered in Matterbridge immediately, even if the AC connection fails on startup. Polling retries every 30 seconds.
+- **Connected flag**: Commands are only sent to the AC when the connection is confirmed active, preventing silent errors.
+- **Debounce improved**: 500ms temperature debounce prevents multiple beeps when HomeKit fires both cooling and heating setpoint callbacks simultaneously.
+- **Token refresh**: Cloud API automatically re-authenticates on token expiry.
+
 ## 1.0.12 (2026-04-03)
 
 - **Fix device not appearing**: Device is now registered in Matterbridge even if the initial API connection fails. The polling loop will retry the connection.

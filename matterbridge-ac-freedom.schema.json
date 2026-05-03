@@ -1,6 +1,6 @@
 {
   "title": "AC Freedom",
-  "description": "matterbridge-ac-freedom v. 1.0.12 by https://github.com/azadaydinli",
+  "description": "matterbridge-ac-freedom v. 2.0.0 by https://github.com/azadaydinli",
   "type": "object",
   "properties": {
     "name": {
@@ -66,11 +66,9 @@
           },
           "tempStep": {
             "title": "Temperature Step",
+            "description": "Temperature increment step (0.5°C or 1°C)",
             "type": "number",
-            "oneOf": [
-              { "title": "0.5°C", "enum": [0.5] },
-              { "title": "1°C", "enum": [1] }
-            ],
+            "enum": [0.5, 1],
             "default": 0.5
           },
           "showExtras": {
@@ -105,11 +103,9 @@
           },
           "tempStep": {
             "title": "Temperature Step",
+            "description": "Temperature increment step (0.5°C or 1°C)",
             "type": "number",
-            "oneOf": [
-              { "title": "0.5°C", "enum": [0.5] },
-              { "title": "1°C", "enum": [1] }
-            ],
+            "enum": [0.5, 1],
             "default": 0.5
           },
           "showExtras": {
