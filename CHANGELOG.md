@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.1.5 (2026-05-03)
+
+- **Fix Region field**: Removed `enum` constraint entirely. Matterbridge UI does not render dropdowns (neither `oneOf` nor `enum`). Region is now a plain text input with a description listing valid values: `eu`, `usa`, `cn`, `rus`.
+
 ## 2.1.4 (2026-05-03)
 
 - **Fix Region dropdown not selectable**: Changed `oneOf` schema format to plain `enum` array (`["eu", "usa", "cn", "rus"]`). Matterbridge UI does not render `oneOf` as a selectable dropdown (same root cause as the earlier tempStep issue).

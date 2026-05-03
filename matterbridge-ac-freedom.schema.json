@@ -1,6 +1,6 @@
 {
   "title": "AC Freedom",
-  "description": "matterbridge-ac-freedom v. 2.1.4 by https://github.com/azadaydinli",
+  "description": "matterbridge-ac-freedom v. 2.1.5 by https://github.com/azadaydinli",
   "type": "object",
   "properties": {
     "name": {
@@ -50,9 +50,8 @@
           },
           "region": {
             "title": "Region",
-            "description": "eu = Europe, usa = USA, cn = China, rus = Russia",
+            "description": "Type: eu (Europe), usa (USA), cn (China), rus (Russia)",
             "type": "string",
-            "enum": ["eu", "usa", "cn", "rus"],
             "default": "eu"
           },
           "deviceId": {
