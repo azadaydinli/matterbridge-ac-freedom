@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.4 (2026-05-03)
+
+- **Fix fan and sleep not appearing**: `addChildDeviceType` creates the child endpoint but does not add cluster servers. Now `createDefaultFanControlClusterServer` and `createOnOffClusterServer` are explicitly called on the child endpoints after creation.
+
 ## 2.0.3 (2026-05-03)
 
 - **Fix fan and sleep controls**: Fan speed and Sleep Mode are now added as child endpoints of the thermostat using `addChildDeviceType()`. This makes them appear inside the climate card in HomeKit, not as separate devices.

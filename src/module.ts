@@ -254,8 +254,15 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
     let sleepChild: MatterbridgeEndpoint | undefined;
 
     if (cfg.showExtras) {
-      fanChild = thermostat.addChildDeviceType('Fan', fanDevice, { uniqueStorageKey: `acf2-${serial}-fan` });
-      sleepChild = thermostat.addChildDeviceType('Sleep', onOffSwitch, { uniqueStorageKey: `acf2-${serial}-sleep` });
+      fanChild = thermostat.addChildDeviceType('Fan', fanDevice);
+      fanChild.createDefaultFanControlClusterServer(
+        FanControl.FanMode.Auto,
+        FanControl.FanModeSequence.OffLowMedHighAuto,
+        0, 0,
+      );
+
+      sleepChild = thermostat.addChildDeviceType('Sleep', onOffSwitch);
+      sleepChild.createOnOffClusterServer(false);
     }
 
     thermostat.addRequiredClusterServers();
