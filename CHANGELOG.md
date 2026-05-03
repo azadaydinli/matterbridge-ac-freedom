@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.1.1 (2026-05-03)
+
+- **Fix fan Low/High swap**: AUX AC `ac_mark` parameter uses an inverted scale (`ac_mark=1` is fast/High, `ac_mark=3` is slow/Low). All fan mode mappings corrected accordingly.
+
 ## 2.1.0 (2026-05-03)
 
 - **Fix fan control not sending commands**: HomeKit writes to `percentSetting`, not only `fanMode`. Now subscribing to both attributes. Added `addRequiredClusterServers()` on fan and sleep child endpoints.

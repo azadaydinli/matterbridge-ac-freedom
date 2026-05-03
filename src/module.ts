@@ -494,11 +494,12 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
   // ── Fan Mode Mapping ───────────────────────────────────────────
   // Sequence: Off=Auto → Low → Medium → High → Auto=Turbo
 
+  // AUX AC: ac_mark=1 = fast (HIGH), ac_mark=3 = slow (LOW) — inverted scale
   private acToFanMode(speed: number): FanControl.FanMode {
     switch (speed) {
-      case FAN_SPEED.LOW:    return FanControl.FanMode.Low;
+      case FAN_SPEED.LOW:    return FanControl.FanMode.High;  // ac_mark=1 → fast → show as High
       case FAN_SPEED.MEDIUM: return FanControl.FanMode.Medium;
-      case FAN_SPEED.HIGH:   return FanControl.FanMode.High;
+      case FAN_SPEED.HIGH:   return FanControl.FanMode.Low;   // ac_mark=3 → slow → show as Low
       case FAN_SPEED.TURBO:  return FanControl.FanMode.Auto;
       default:               return FanControl.FanMode.Off;
     }
@@ -506,20 +507,20 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
 
   private fanModeToAc(mode: FanControl.FanMode): number {
     switch (mode) {
-      case FanControl.FanMode.Low:    return FAN_SPEED.LOW;
+      case FanControl.FanMode.Low:    return FAN_SPEED.HIGH;  // Low in HomeKit → slow → ac_mark=3
       case FanControl.FanMode.Medium: return FAN_SPEED.MEDIUM;
-      case FanControl.FanMode.High:   return FAN_SPEED.HIGH;
+      case FanControl.FanMode.High:   return FAN_SPEED.LOW;   // High in HomeKit → fast → ac_mark=1
       case FanControl.FanMode.Auto:   return FAN_SPEED.TURBO;
       default:                        return FAN_SPEED.AUTO;
     }
   }
 
-  // pct: 0=Auto, 25=Low, 50=Medium, 75=High, 100=Turbo
+  // pct: 0=Auto, 25=Low(slow), 50=Medium, 75=High(fast), 100=Turbo
   private fanSpeedToPct(speed: number): number {
     switch (speed) {
-      case FAN_SPEED.LOW:    return 25;
+      case FAN_SPEED.LOW:    return 75;  // ac_mark=1 fast → 75%
       case FAN_SPEED.MEDIUM: return 50;
-      case FAN_SPEED.HIGH:   return 75;
+      case FAN_SPEED.HIGH:   return 25;  // ac_mark=3 slow → 25%
       case FAN_SPEED.TURBO:  return 100;
       default:               return 0;
     }
@@ -527,9 +528,9 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
 
   private pctToFanSpeed(pct: number): number {
     if (pct <= 0)   return FAN_SPEED.AUTO;
-    if (pct <= 37)  return FAN_SPEED.LOW;
+    if (pct <= 37)  return FAN_SPEED.HIGH;   // low pct → slow → ac_mark=3
     if (pct <= 62)  return FAN_SPEED.MEDIUM;
-    if (pct <= 87)  return FAN_SPEED.HIGH;
+    if (pct <= 87)  return FAN_SPEED.LOW;    // high pct → fast → ac_mark=1
     return FAN_SPEED.TURBO;
   }
 
