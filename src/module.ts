@@ -255,12 +255,10 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
 
     if (cfg.showExtras) {
       fanChild = thermostat.addChildDeviceType('Fan', fanDevice);
-      // speedMax=3 → 4 discrete steps: 0=Auto, 1=Low, 2=Medium, 3=High
-      fanChild.createMultiSpeedFanControlClusterServer(
+      fanChild.createDefaultFanControlClusterServer(
         FanControl.FanMode.Auto,
         FanControl.FanModeSequence.OffLowMedHighAuto,
-        0, 0,  // percentSetting, percentCurrent
-        3, 0, 0, // speedMax, speedSetting, speedCurrent
+        0, 0,
       );
 
       sleepChild = thermostat.addChildDeviceType('Sleep', onOffSwitch);
@@ -329,11 +327,11 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       this.debounceSendTemp(dev);
     });
 
-    // Fan control (child endpoint) — 4 discrete steps via speedSetting
+    // Fan control (child endpoint) — discrete mode picker via fanMode
     if (fanChild) {
-      await fanChild.subscribeAttribute('FanControl', 'speedSetting', (val: unknown) => {
-        const speed = this.speedSettingToAc((val as number | null) ?? 0);
-        this.log.info(`speedSetting → ${val} (ac speed: ${speed})`);
+      await fanChild.subscribeAttribute('FanControl', 'fanMode', (val: unknown) => {
+        const speed = this.fanModeToAc(val as FanControl.FanMode);
+        this.log.info(`fanMode → ${val} (ac speed: ${speed})`);
         dev.state.fanSpeed = speed;
         this.sendFanSpeed(dev, speed);
       });
@@ -469,14 +467,9 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
     await thermostat.updateAttribute('Thermostat', 'occupiedCoolingSetpoint', Math.round(state.targetTemp * 100), this.log);
     await thermostat.updateAttribute('Thermostat', 'occupiedHeatingSetpoint', Math.round(state.targetTemp * 100), this.log);
 
-    // Fan (child endpoint) — 4 discrete steps
+    // Fan (child endpoint) — mode picker
     if (fanChild) {
-      const ss = this.acToSpeedSetting(state.fanSpeed);
-      const pct = Math.round((ss / 3) * 100);
-      await fanChild.updateAttribute('FanControl', 'speedSetting', ss, this.log);
-      await fanChild.updateAttribute('FanControl', 'speedCurrent', ss, this.log);
-      await fanChild.updateAttribute('FanControl', 'percentSetting', pct, this.log);
-      await fanChild.updateAttribute('FanControl', 'percentCurrent', pct, this.log);
+      await fanChild.updateAttribute('FanControl', 'fanMode', this.acToFanMode(state.fanSpeed), this.log);
     }
 
     // Sleep (child endpoint)
@@ -485,25 +478,25 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
     }
   }
 
-  // ── Fan Speed Mapping (4 discrete steps) ──────────────────────
-  // speedSetting: 0=Auto, 1=Low, 2=Medium, 3=High
+  // ── Fan Mode Mapping ───────────────────────────────────────────
+  // HomeKit fanMode picker: Auto / Low / Medium / High
 
-  private acToSpeedSetting(speed: number): number {
+  private acToFanMode(speed: number): FanControl.FanMode {
     switch (speed) {
-      case FAN_SPEED.LOW:   return 1;
-      case FAN_SPEED.MEDIUM: return 2;
+      case FAN_SPEED.LOW:    return FanControl.FanMode.Low;
+      case FAN_SPEED.MEDIUM: return FanControl.FanMode.Medium;
       case FAN_SPEED.HIGH:
-      case FAN_SPEED.TURBO: return 3;
-      default:              return 0; // AUTO, MUTE → step 0 (Auto)
+      case FAN_SPEED.TURBO:  return FanControl.FanMode.High;
+      default:               return FanControl.FanMode.Auto;
     }
   }
 
-  private speedSettingToAc(speed: number): number {
-    switch (speed) {
-      case 1: return FAN_SPEED.LOW;
-      case 2: return FAN_SPEED.MEDIUM;
-      case 3: return FAN_SPEED.HIGH;
-      default: return FAN_SPEED.AUTO; // 0 → Auto
+  private fanModeToAc(mode: FanControl.FanMode): number {
+    switch (mode) {
+      case FanControl.FanMode.Low:    return FAN_SPEED.LOW;
+      case FanControl.FanMode.Medium: return FAN_SPEED.MEDIUM;
+      case FanControl.FanMode.High:   return FAN_SPEED.HIGH;
+      default:                        return FAN_SPEED.AUTO;
     }
   }
 

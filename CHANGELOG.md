@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.6 (2026-05-03)
+
+- **Fan control: mode picker instead of slider**: Switched from `MultiSpeed` (slider) back to `fanMode`-based control. HomeKit renders `fanMode` as a discrete mode picker card (Auto / Low / Medium / High).
+
 ## 2.0.5 (2026-05-03)
 
 - **Fan control: 4 discrete steps**: Fan speed is now a 4-step control (Auto → Low → Medium → High) instead of a free-sliding percentage. Uses `MultiSpeed` feature with `speedMax=3`.
