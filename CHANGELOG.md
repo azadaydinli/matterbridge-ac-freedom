@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.1.7 (2026-05-03)
+
+- **Separate fan speed mappings for Cloud and Local**: Cloud API uses a direct scale (`ac_mark` 0=Auto 1=Low 2=Medium 3=High 4=Turbo). Local Broadlink UDP uses an inverted scale (`ac_mark` 1=fast/High 3=slow/Low). All four mapping functions (`acToFanMode`, `fanModeToAc`, `fanSpeedToPct`, `pctToFanSpeed`) now take `apiType` and apply the correct mapping per connection type.
+
 ## 2.1.6 (2026-05-03)
 
 - **Restore Sleep Mode switch**: Two-phase registration ensures the `onOffSwitch` child is only added from the second Matterbridge startup onwards. On first registration HomeKit commits the device as a climate card (thermostat + fanDevice only); subsequent startups safely add the sleep switch without changing the HomeKit category. Registration state is persisted to `ac-freedom-state.json` in the Matterbridge data directory.

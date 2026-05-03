@@ -380,7 +380,7 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
     // Fan control (child endpoint) — subscribe to both fanMode and percentSetting
     if (fanChild) {
       await fanChild.subscribeAttribute('FanControl', 'fanMode', (val: unknown) => {
-        const speed = this.fanModeToAc(val as FanControl.FanMode);
+        const speed = this.fanModeToAc(val as FanControl.FanMode, dev.apiType);
         this.log.info(`fanMode → ${val} (ac speed: ${speed})`);
         dev.state.fanSpeed = speed;
         this.sendFanSpeed(dev, speed);
@@ -388,7 +388,7 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
 
       await fanChild.subscribeAttribute('FanControl', 'percentSetting', (val: unknown) => {
         const pct = (val as number | null) ?? 0;
-        const speed = this.pctToFanSpeed(pct);
+        const speed = this.pctToFanSpeed(pct, dev.apiType);
         this.log.info(`fanPercent → ${pct}% (ac speed: ${speed})`);
         dev.state.fanSpeed = speed;
         this.sendFanSpeed(dev, speed);
@@ -527,8 +527,8 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
 
     // Fan (child endpoint)
     if (fanChild) {
-      const pct = this.fanSpeedToPct(state.fanSpeed);
-      await fanChild.updateAttribute('FanControl', 'fanMode', this.acToFanMode(state.fanSpeed), this.log);
+      const pct = this.fanSpeedToPct(state.fanSpeed, dev.apiType);
+      await fanChild.updateAttribute('FanControl', 'fanMode', this.acToFanMode(state.fanSpeed, dev.apiType), this.log);
       await fanChild.updateAttribute('FanControl', 'percentSetting', pct, this.log);
       await fanChild.updateAttribute('FanControl', 'percentCurrent', pct, this.log);
     }
@@ -540,46 +540,94 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
   }
 
   // ── Fan Mode Mapping ───────────────────────────────────────────
-  // Sequence: Off=Auto → Low → Medium → High → Auto=Turbo
+  //
+  // Cloud API  — direct scale: ac_mark 0=Auto 1=Low 2=Medium 3=High 4=Turbo
+  // Local UDP  — inverted scale: ac_mark 1=fast(High) 2=Medium 3=slow(Low) 4=Turbo
+  //
+  // HomeKit slider: 0%=Off(Auto)  25%=Low  50%=Medium  75%=High  100%=Auto(Turbo)
 
-  // AUX AC: ac_mark=1 = fast (HIGH), ac_mark=3 = slow (LOW) — inverted scale
-  private acToFanMode(speed: number): FanControl.FanMode {
-    switch (speed) {
-      case FAN_SPEED.LOW:    return FanControl.FanMode.High;  // ac_mark=1 → fast → show as High
-      case FAN_SPEED.MEDIUM: return FanControl.FanMode.Medium;
-      case FAN_SPEED.HIGH:   return FanControl.FanMode.Low;   // ac_mark=3 → slow → show as Low
-      case FAN_SPEED.TURBO:  return FanControl.FanMode.Auto;
-      default:               return FanControl.FanMode.Off;
+  private acToFanMode(speed: number, apiType: 'cloud' | 'local'): FanControl.FanMode {
+    if (apiType === 'cloud') {
+      // Direct: ac_mark=1→Low, ac_mark=3→High
+      switch (speed) {
+        case FAN_SPEED.LOW:    return FanControl.FanMode.Low;
+        case FAN_SPEED.MEDIUM: return FanControl.FanMode.Medium;
+        case FAN_SPEED.HIGH:   return FanControl.FanMode.High;
+        case FAN_SPEED.TURBO:  return FanControl.FanMode.Auto;
+        default:               return FanControl.FanMode.Off;
+      }
+    } else {
+      // Inverted: ac_mark=1=fast→High, ac_mark=3=slow→Low
+      switch (speed) {
+        case FAN_SPEED.LOW:    return FanControl.FanMode.High;
+        case FAN_SPEED.MEDIUM: return FanControl.FanMode.Medium;
+        case FAN_SPEED.HIGH:   return FanControl.FanMode.Low;
+        case FAN_SPEED.TURBO:  return FanControl.FanMode.Auto;
+        default:               return FanControl.FanMode.Off;
+      }
     }
   }
 
-  private fanModeToAc(mode: FanControl.FanMode): number {
-    switch (mode) {
-      case FanControl.FanMode.Low:    return FAN_SPEED.HIGH;  // Low in HomeKit → slow → ac_mark=3
-      case FanControl.FanMode.Medium: return FAN_SPEED.MEDIUM;
-      case FanControl.FanMode.High:   return FAN_SPEED.LOW;   // High in HomeKit → fast → ac_mark=1
-      case FanControl.FanMode.Auto:   return FAN_SPEED.TURBO;
-      default:                        return FAN_SPEED.AUTO;
+  private fanModeToAc(mode: FanControl.FanMode, apiType: 'cloud' | 'local'): number {
+    if (apiType === 'cloud') {
+      // Direct: Low→ac_mark=1, High→ac_mark=3
+      switch (mode) {
+        case FanControl.FanMode.Low:    return FAN_SPEED.LOW;
+        case FanControl.FanMode.Medium: return FAN_SPEED.MEDIUM;
+        case FanControl.FanMode.High:   return FAN_SPEED.HIGH;
+        case FanControl.FanMode.Auto:   return FAN_SPEED.TURBO;
+        default:                        return FAN_SPEED.AUTO;
+      }
+    } else {
+      // Inverted: Low→ac_mark=3(slow), High→ac_mark=1(fast)
+      switch (mode) {
+        case FanControl.FanMode.Low:    return FAN_SPEED.HIGH;
+        case FanControl.FanMode.Medium: return FAN_SPEED.MEDIUM;
+        case FanControl.FanMode.High:   return FAN_SPEED.LOW;
+        case FanControl.FanMode.Auto:   return FAN_SPEED.TURBO;
+        default:                        return FAN_SPEED.AUTO;
+      }
     }
   }
 
-  // pct: 0=Auto, 25=Low(slow), 50=Medium, 75=High(fast), 100=Turbo
-  private fanSpeedToPct(speed: number): number {
-    switch (speed) {
-      case FAN_SPEED.LOW:    return 75;  // ac_mark=1 fast → 75%
-      case FAN_SPEED.MEDIUM: return 50;
-      case FAN_SPEED.HIGH:   return 25;  // ac_mark=3 slow → 25%
-      case FAN_SPEED.TURBO:  return 100;
-      default:               return 0;
+  private fanSpeedToPct(speed: number, apiType: 'cloud' | 'local'): number {
+    if (apiType === 'cloud') {
+      // Direct: ac_mark=1→25%, ac_mark=3→75%
+      switch (speed) {
+        case FAN_SPEED.LOW:    return 25;
+        case FAN_SPEED.MEDIUM: return 50;
+        case FAN_SPEED.HIGH:   return 75;
+        case FAN_SPEED.TURBO:  return 100;
+        default:               return 0;
+      }
+    } else {
+      // Inverted: ac_mark=1(fast)→75%, ac_mark=3(slow)→25%
+      switch (speed) {
+        case FAN_SPEED.LOW:    return 75;
+        case FAN_SPEED.MEDIUM: return 50;
+        case FAN_SPEED.HIGH:   return 25;
+        case FAN_SPEED.TURBO:  return 100;
+        default:               return 0;
+      }
     }
   }
 
-  private pctToFanSpeed(pct: number): number {
-    if (pct <= 0)   return FAN_SPEED.AUTO;
-    if (pct <= 37)  return FAN_SPEED.HIGH;   // low pct → slow → ac_mark=3
-    if (pct <= 62)  return FAN_SPEED.MEDIUM;
-    if (pct <= 87)  return FAN_SPEED.LOW;    // high pct → fast → ac_mark=1
-    return FAN_SPEED.TURBO;
+  private pctToFanSpeed(pct: number, apiType: 'cloud' | 'local'): number {
+    if (apiType === 'cloud') {
+      // Direct: low pct → low ac_mark
+      if (pct <= 0)  return FAN_SPEED.AUTO;
+      if (pct <= 37) return FAN_SPEED.LOW;
+      if (pct <= 62) return FAN_SPEED.MEDIUM;
+      if (pct <= 87) return FAN_SPEED.HIGH;
+      return FAN_SPEED.TURBO;
+    } else {
+      // Inverted: low pct → high ac_mark (slow speed)
+      if (pct <= 0)  return FAN_SPEED.AUTO;
+      if (pct <= 37) return FAN_SPEED.HIGH;
+      if (pct <= 62) return FAN_SPEED.MEDIUM;
+      if (pct <= 87) return FAN_SPEED.LOW;
+      return FAN_SPEED.TURBO;
+    }
   }
 
   // ── Send Commands to AC ────────────────────────────────────────
