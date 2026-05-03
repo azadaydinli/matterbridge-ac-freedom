@@ -255,10 +255,12 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
 
     if (cfg.showExtras) {
       fanChild = thermostat.addChildDeviceType('Fan', fanDevice);
-      fanChild.createDefaultFanControlClusterServer(
+      // speedMax=3 → 4 discrete steps: 0=Auto, 1=Low, 2=Medium, 3=High
+      fanChild.createMultiSpeedFanControlClusterServer(
         FanControl.FanMode.Auto,
         FanControl.FanModeSequence.OffLowMedHighAuto,
-        0, 0,
+        0, 0,  // percentSetting, percentCurrent
+        3, 0, 0, // speedMax, speedSetting, speedCurrent
       );
 
       sleepChild = thermostat.addChildDeviceType('Sleep', onOffSwitch);
@@ -327,19 +329,11 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       this.debounceSendTemp(dev);
     });
 
-    // Fan control (child endpoint)
+    // Fan control (child endpoint) — 4 discrete steps via speedSetting
     if (fanChild) {
-      await fanChild.subscribeAttribute('FanControl', 'fanMode', (val: unknown) => {
-        const speed = this.matterFanToAc(val as FanControl.FanMode);
-        this.log.info(`fanMode → ${val} (speed: ${speed})`);
-        dev.state.fanSpeed = speed;
-        this.sendFanSpeed(dev, speed);
-      });
-
-      await fanChild.subscribeAttribute('FanControl', 'percentSetting', (val: unknown) => {
-        const pct = (val as number | null) ?? 0;
-        const speed = this.pctToFanSpeed(pct);
-        this.log.info(`fanPercent → ${pct}% (speed: ${speed})`);
+      await fanChild.subscribeAttribute('FanControl', 'speedSetting', (val: unknown) => {
+        const speed = this.speedSettingToAc((val as number | null) ?? 0);
+        this.log.info(`speedSetting → ${val} (ac speed: ${speed})`);
         dev.state.fanSpeed = speed;
         this.sendFanSpeed(dev, speed);
       });
@@ -475,10 +469,12 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
     await thermostat.updateAttribute('Thermostat', 'occupiedCoolingSetpoint', Math.round(state.targetTemp * 100), this.log);
     await thermostat.updateAttribute('Thermostat', 'occupiedHeatingSetpoint', Math.round(state.targetTemp * 100), this.log);
 
-    // Fan (child endpoint)
+    // Fan (child endpoint) — 4 discrete steps
     if (fanChild) {
-      const pct = this.fanSpeedToPct(state.fanSpeed);
-      await fanChild.updateAttribute('FanControl', 'fanMode', this.acFanToMatter(state.fanSpeed), this.log);
+      const ss = this.acToSpeedSetting(state.fanSpeed);
+      const pct = Math.round((ss / 3) * 100);
+      await fanChild.updateAttribute('FanControl', 'speedSetting', ss, this.log);
+      await fanChild.updateAttribute('FanControl', 'speedCurrent', ss, this.log);
       await fanChild.updateAttribute('FanControl', 'percentSetting', pct, this.log);
       await fanChild.updateAttribute('FanControl', 'percentCurrent', pct, this.log);
     }
@@ -489,40 +485,26 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
     }
   }
 
-  // ── Fan Speed Mapping ──────────────────────────────────────────
+  // ── Fan Speed Mapping (4 discrete steps) ──────────────────────
+  // speedSetting: 0=Auto, 1=Low, 2=Medium, 3=High
 
-  private acFanToMatter(speed: number): FanControl.FanMode {
+  private acToSpeedSetting(speed: number): number {
     switch (speed) {
-      case FAN_SPEED.LOW: return FanControl.FanMode.Low;
-      case FAN_SPEED.MEDIUM: return FanControl.FanMode.Medium;
-      case FAN_SPEED.HIGH: case FAN_SPEED.TURBO: return FanControl.FanMode.High;
-      case FAN_SPEED.MUTE: return FanControl.FanMode.Low;
-      default: return FanControl.FanMode.Auto;
+      case FAN_SPEED.LOW:   return 1;
+      case FAN_SPEED.MEDIUM: return 2;
+      case FAN_SPEED.HIGH:
+      case FAN_SPEED.TURBO: return 3;
+      default:              return 0; // AUTO, MUTE → step 0 (Auto)
     }
   }
 
-  private matterFanToAc(mode: FanControl.FanMode): number {
-    switch (mode) {
-      case FanControl.FanMode.Low: return FAN_SPEED.LOW;
-      case FanControl.FanMode.Medium: return FAN_SPEED.MEDIUM;
-      case FanControl.FanMode.High: return FAN_SPEED.HIGH;
-      case FanControl.FanMode.Auto: return FAN_SPEED.AUTO;
-      default: return FAN_SPEED.AUTO;
+  private speedSettingToAc(speed: number): number {
+    switch (speed) {
+      case 1: return FAN_SPEED.LOW;
+      case 2: return FAN_SPEED.MEDIUM;
+      case 3: return FAN_SPEED.HIGH;
+      default: return FAN_SPEED.AUTO; // 0 → Auto
     }
-  }
-
-  private fanSpeedToPct(speed: number): number {
-    const map: Record<number, number> = { 0: 0, 5: 20, 1: 40, 2: 60, 3: 80, 4: 100 };
-    return map[speed] ?? 0;
-  }
-
-  private pctToFanSpeed(pct: number): number {
-    if (pct <= 0) return FAN_SPEED.AUTO;
-    if (pct <= 20) return FAN_SPEED.MUTE;
-    if (pct <= 40) return FAN_SPEED.LOW;
-    if (pct <= 60) return FAN_SPEED.MEDIUM;
-    if (pct <= 80) return FAN_SPEED.HIGH;
-    return FAN_SPEED.TURBO;
   }
 
   // ── Send Commands to AC ────────────────────────────────────────

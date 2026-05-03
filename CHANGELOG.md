@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.5 (2026-05-03)
+
+- **Fan control: 4 discrete steps**: Fan speed is now a 4-step control (Auto → Low → Medium → High) instead of a free-sliding percentage. Uses `MultiSpeed` feature with `speedMax=3`.
+- **Fan speed order fixed**: Step 0=Auto, 1=Low, 2=Medium, 3=High. Turbo removed.
+
 ## 2.0.4 (2026-05-03)
 
 - **Fix fan and sleep not appearing**: `addChildDeviceType` creates the child endpoint but does not add cluster servers. Now `createDefaultFanControlClusterServer` and `createOnOffClusterServer` are explicitly called on the child endpoints after creation.
