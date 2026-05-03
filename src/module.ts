@@ -249,33 +249,57 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
         0, 16, 32, 16, 32,
       );
 
-    // ── Add fan + sleep as child endpoints (composed device) ──
-    let fanChild: MatterbridgeEndpoint | undefined;
-    let sleepChild: MatterbridgeEndpoint | undefined;
-
-    if (cfg.showExtras) {
-      fanChild = thermostat.addChildDeviceType('Fan', modeSelect);
-      fanChild.createDefaultModeSelectClusterServer(
-        'Fan Speed',
-        [
-          { label: 'Auto',   mode: 0, semanticTags: [] },
-          { label: 'Low',    mode: 1, semanticTags: [] },
-          { label: 'Medium', mode: 2, semanticTags: [] },
-          { label: 'High',   mode: 3, semanticTags: [] },
-        ],
-        0, // currentMode = Auto
-        0, // startUpMode = Auto
-      );
-
-      sleepChild = thermostat.addChildDeviceType('Sleep', onOffSwitch);
-      sleepChild.createOnOffClusterServer(false);
-    }
-
     thermostat.addRequiredClusterServers();
 
     this.setSelectDevice(serial, cfg.name);
     const selected = this.validateDevice([cfg.name, serial]);
     if (selected) await this.registerDevice(thermostat);
+
+    // ── Fan speed — separate bridged modeSelect device ──
+    let fanChild: MatterbridgeEndpoint | undefined;
+    let sleepChild: MatterbridgeEndpoint | undefined;
+
+    if (cfg.showExtras) {
+      const fanSerial = `${serial}-fan`;
+      fanChild = new MatterbridgeEndpoint(modeSelect, { uniqueStorageKey: `acf2-${fanSerial}` });
+      fanChild
+        .createDefaultBridgedDeviceBasicInformationClusterServer(
+          `${cfg.name} Fan`, fanSerial,
+          this.matterbridge.aggregatorVendorId,
+          'AUX', 'AC Freedom', 10001, '2.0.8',
+        )
+        .createDefaultModeSelectClusterServer(
+          'Fan Speed',
+          [
+            { label: 'Auto',   mode: 0, semanticTags: [] },
+            { label: 'Low',    mode: 1, semanticTags: [] },
+            { label: 'Medium', mode: 2, semanticTags: [] },
+            { label: 'High',   mode: 3, semanticTags: [] },
+          ],
+          0, 0,
+        )
+        .addRequiredClusterServers();
+
+      this.setSelectDevice(fanSerial, `${cfg.name} Fan`);
+      const fanSelected = this.validateDevice([`${cfg.name} Fan`, fanSerial]);
+      if (fanSelected) await this.registerDevice(fanChild);
+
+      // ── Sleep mode — separate bridged onOffSwitch device ──
+      const sleepSerial = `${serial}-sleep`;
+      sleepChild = new MatterbridgeEndpoint(onOffSwitch, { uniqueStorageKey: `acf2-${sleepSerial}` });
+      sleepChild
+        .createDefaultBridgedDeviceBasicInformationClusterServer(
+          `${cfg.name} Sleep`, sleepSerial,
+          this.matterbridge.aggregatorVendorId,
+          'AUX', 'AC Freedom', 10002, '2.0.8',
+        )
+        .createOnOffClusterServer(false)
+        .addRequiredClusterServers();
+
+      this.setSelectDevice(sleepSerial, `${cfg.name} Sleep`);
+      const sleepSelected = this.validateDevice([`${cfg.name} Sleep`, sleepSerial]);
+      if (sleepSelected) await this.registerDevice(sleepChild);
+    }
 
     const dev: ManagedDevice = {
       config: cfg,
