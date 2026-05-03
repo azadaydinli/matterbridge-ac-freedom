@@ -1,6 +1,6 @@
 {
   "title": "AC Freedom",
-  "description": "matterbridge-ac-freedom v. 2.1.2 by https://github.com/azadaydinli",
+  "description": "matterbridge-ac-freedom v. 2.1.3 by https://github.com/azadaydinli",
   "type": "object",
   "properties": {
     "name": {
@@ -66,7 +66,7 @@
           },
           "showExtras": {
             "title": "Extra Controls",
-            "description": "Add fan speed control and sleep mode switch",
+            "description": "Add fan speed control inside the climate card",
             "type": "boolean",
             "default": false
           }
@@ -96,7 +96,7 @@
           },
           "showExtras": {
             "title": "Extra Controls",
-            "description": "Add fan speed control and sleep mode switch",
+            "description": "Add fan speed control inside the climate card",
             "type": "boolean",
             "default": false
           }

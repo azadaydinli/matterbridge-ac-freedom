@@ -4,14 +4,13 @@
  * Exposes AUX air conditioners via Matter protocol.
  *
  * Device structure:
- * - Thermostat endpoint with FanControl cluster (single endpoint, no children)
- *   → HomeKit shows this as a climate card with fan speed control
- * - Sleep Mode as a separate bridged switch device (when showExtras is ON)
- *   → HomeKit shows this as a separate switch tile
+ * - Thermostat endpoint (primary device type → HomeKit climate card)
+ * - fanDevice child endpoint (when showExtras=true) → fan speed control inside climate card
  *
- * FanControl is an optional cluster on the Thermostat device type per Matter spec.
- * Adding it directly to the thermostat (not as a child fanDevice) ensures HomeKit
- * always categorizes the device as a thermostat/climate card.
+ * Key rule: onOffSwitch MUST NOT be added as a child endpoint on first registration —
+ * HomeKit uses the child device types at first registration to determine the tile category.
+ * Adding onOffSwitch causes HomeKit to categorise the device as a switch tile, not climate.
+ * fanDevice child is safe: HomeKit still shows thermostat as climate card.
  *
  * Supports both cloud (BroadLink SmartHomeCS) and local (Broadlink UDP) connections.
  */
@@ -23,7 +22,6 @@ import {
   PlatformConfig,
   thermostatDevice,
   fanDevice,
-  onOffSwitch,
 } from 'matterbridge';
 import { Thermostat, FanControl } from 'matterbridge/matter/clusters';
 import { AnsiLogger, LogLevel } from 'matterbridge/logger';
@@ -98,7 +96,6 @@ interface ManagedDevice {
   state: AcState;
   thermostat: MatterbridgeEndpoint;
   fanChild?: MatterbridgeEndpoint;
-  sleepChild?: MatterbridgeEndpoint;
   pollTimer?: ReturnType<typeof setInterval>;
   tempDebounce?: ReturnType<typeof setTimeout>;
 }
@@ -129,24 +126,8 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
 
   override async onConfigure(): Promise<void> {
     await super.onConfigure();
-    this.log.info('onConfigure: adding extras, subscribing, starting polls');
+    this.log.info('onConfigure: subscribing and starting polls');
     for (const dev of this.devices) {
-      // Add fan + sleep children HERE (after thermostat is registered as climate card)
-      if (dev.config.showExtras) {
-        dev.fanChild = dev.thermostat.addChildDeviceType('Fan', fanDevice);
-        dev.fanChild.createDefaultFanControlClusterServer(
-          FanControl.FanMode.Off,
-          FanControl.FanModeSequence.OffLowMedHighAuto,
-          0, 0,
-        );
-        dev.fanChild.addRequiredClusterServers();
-
-        dev.sleepChild = dev.thermostat.addChildDeviceType('Sleep', onOffSwitch);
-        dev.sleepChild.createOnOffClusterServer(false);
-        dev.sleepChild.addRequiredClusterServers();
-
-        this.log.info(`Extras added for "${dev.config.name}"`);
-      }
       await this.subscribe(dev);
       this.startPolling(dev);
     }
@@ -252,7 +233,8 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
     };
 
     // ── Create thermostat endpoint ──
-    const thermostat = new MatterbridgeEndpoint(thermostatDevice, { uniqueStorageKey: `acf2-${serial}` });
+    // acf3- prefix forces fresh HomeKit registration (clears any cached wrong category)
+    const thermostat = new MatterbridgeEndpoint(thermostatDevice, { uniqueStorageKey: `acf3-${serial}` });
     thermostat
       .createDefaultBridgedDeviceBasicInformationClusterServer(
         cfg.name || 'AUX AC', serial,
@@ -264,6 +246,20 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
         state.currentTemp, state.targetTemp, state.targetTemp,
         0, 16, 32, 16, 32,
       );
+
+    // ── Fan child endpoint (before registerDevice so HomeKit sees it at first registration)
+    // fanDevice child does NOT trigger switch categorisation — thermostat remains climate card.
+    // onOffSwitch child MUST NOT be added here: it causes HomeKit to categorise as switch.
+    let fanChild: MatterbridgeEndpoint | undefined;
+    if (cfg.showExtras) {
+      fanChild = thermostat.addChildDeviceType('Fan', fanDevice);
+      fanChild.createDefaultFanControlClusterServer(
+        FanControl.FanMode.Off,
+        FanControl.FanModeSequence.OffLowMedHighAuto,
+        0, 0,
+      );
+      fanChild.addRequiredClusterServers();
+    }
 
     thermostat.addRequiredClusterServers();
 
@@ -279,8 +275,7 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       connected,
       state,
       thermostat,
-      fanChild: undefined,
-      sleepChild: undefined,
+      fanChild,
     };
 
     this.devices.push(dev);
@@ -290,7 +285,7 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
   // ── Subscribe (Matter → AC) ────────────────────────────────────
 
   private async subscribe(dev: ManagedDevice): Promise<void> {
-    const { thermostat, fanChild, sleepChild } = dev;
+    const { thermostat, fanChild } = dev;
 
     // System mode
     await thermostat.subscribeAttribute('Thermostat', 'systemMode', (val: unknown) => {
@@ -345,14 +340,6 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       });
     }
 
-    // Sleep switch (child endpoint)
-    if (sleepChild) {
-      await sleepChild.subscribeAttribute('OnOff', 'onOff', (val: unknown) => {
-        dev.state.sleep = val as boolean;
-        this.log.info(`sleep → ${val}`);
-        this.sendSleep(dev, val as boolean);
-      });
-    }
   }
 
   // ── Temperature Debounce ───────────────────────────────────────
@@ -439,7 +426,7 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
   }
 
   private async pushToMatter(dev: ManagedDevice): Promise<void> {
-    const { thermostat, fanChild, sleepChild, state } = dev;
+    const { thermostat, fanChild, state } = dev;
 
     // System mode
     let sysMode: Thermostat.SystemMode;
@@ -483,10 +470,6 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       await fanChild.updateAttribute('FanControl', 'percentCurrent', pct, this.log);
     }
 
-    // Sleep (child endpoint)
-    if (sleepChild) {
-      await sleepChild.updateAttribute('OnOff', 'onOff', state.sleep, this.log);
-    }
   }
 
   // ── Fan Mode Mapping ───────────────────────────────────────────

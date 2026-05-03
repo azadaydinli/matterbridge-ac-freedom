@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.1.3 (2026-05-03)
+
+- **Fix device always showing as climate card**: Changed storage key prefix to `acf3-` to force fresh HomeKit registration and clear any cached wrong category. Fan child endpoint (`fanDevice`) is now added in `addDevice` before `registerDevice` — HomeKit commits to the climate-card category at first registration. Sleep Mode switch removed from HomeKit UI: `onOffSwitch` child device type causes HomeKit to categorise the composed device as a switch tile on first registration, which cannot be reversed without a full re-registration.
+
 ## 2.1.2 (2026-05-03)
 
 - **Fix new device categorised as switch when extras ON**: Fan and Sleep child endpoints are now added in `onConfigure` (after the thermostat is already registered as a climate card) instead of during `addDevice`. HomeKit commits to the climate-card category on first registration; children added afterwards appear inside the climate card without changing the category.
