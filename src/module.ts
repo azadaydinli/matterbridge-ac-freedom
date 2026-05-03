@@ -255,15 +255,16 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
 
     if (cfg.showExtras) {
       fanChild = thermostat.addChildDeviceType('Fan', fanDevice);
-      // FanMode sequence: Off=Auto, Low, Medium, High, Auto=Turbo
       fanChild.createDefaultFanControlClusterServer(
         FanControl.FanMode.Off,
         FanControl.FanModeSequence.OffLowMedHighAuto,
         0, 0,
       );
+      fanChild.addRequiredClusterServers();
 
       sleepChild = thermostat.addChildDeviceType('Sleep', onOffSwitch);
       sleepChild.createOnOffClusterServer(false);
+      sleepChild.addRequiredClusterServers();
     }
 
     thermostat.addRequiredClusterServers();
@@ -328,11 +329,19 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       this.debounceSendTemp(dev);
     });
 
-    // Fan control (child endpoint)
+    // Fan control (child endpoint) — subscribe to both fanMode and percentSetting
     if (fanChild) {
       await fanChild.subscribeAttribute('FanControl', 'fanMode', (val: unknown) => {
         const speed = this.fanModeToAc(val as FanControl.FanMode);
         this.log.info(`fanMode → ${val} (ac speed: ${speed})`);
+        dev.state.fanSpeed = speed;
+        this.sendFanSpeed(dev, speed);
+      });
+
+      await fanChild.subscribeAttribute('FanControl', 'percentSetting', (val: unknown) => {
+        const pct = (val as number | null) ?? 0;
+        const speed = this.pctToFanSpeed(pct);
+        this.log.info(`fanPercent → ${pct}% (ac speed: ${speed})`);
         dev.state.fanSpeed = speed;
         this.sendFanSpeed(dev, speed);
       });
@@ -470,7 +479,10 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
 
     // Fan (child endpoint)
     if (fanChild) {
+      const pct = this.fanSpeedToPct(state.fanSpeed);
       await fanChild.updateAttribute('FanControl', 'fanMode', this.acToFanMode(state.fanSpeed), this.log);
+      await fanChild.updateAttribute('FanControl', 'percentSetting', pct, this.log);
+      await fanChild.updateAttribute('FanControl', 'percentCurrent', pct, this.log);
     }
 
     // Sleep (child endpoint)
@@ -480,15 +492,15 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
   }
 
   // ── Fan Mode Mapping ───────────────────────────────────────────
-  // Slider sequence: Off=Auto → Low → Medium → High → Auto=Turbo
+  // Sequence: Off=Auto → Low → Medium → High → Auto=Turbo
 
   private acToFanMode(speed: number): FanControl.FanMode {
     switch (speed) {
       case FAN_SPEED.LOW:    return FanControl.FanMode.Low;
       case FAN_SPEED.MEDIUM: return FanControl.FanMode.Medium;
       case FAN_SPEED.HIGH:   return FanControl.FanMode.High;
-      case FAN_SPEED.TURBO:  return FanControl.FanMode.Auto;  // Turbo = Auto position
-      default:               return FanControl.FanMode.Off;   // AUTO = Off position
+      case FAN_SPEED.TURBO:  return FanControl.FanMode.Auto;
+      default:               return FanControl.FanMode.Off;
     }
   }
 
@@ -497,9 +509,28 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       case FanControl.FanMode.Low:    return FAN_SPEED.LOW;
       case FanControl.FanMode.Medium: return FAN_SPEED.MEDIUM;
       case FanControl.FanMode.High:   return FAN_SPEED.HIGH;
-      case FanControl.FanMode.Auto:   return FAN_SPEED.TURBO; // Auto position = Turbo
-      default:                        return FAN_SPEED.AUTO;  // Off position = Auto
+      case FanControl.FanMode.Auto:   return FAN_SPEED.TURBO;
+      default:                        return FAN_SPEED.AUTO;
     }
+  }
+
+  // pct: 0=Auto, 25=Low, 50=Medium, 75=High, 100=Turbo
+  private fanSpeedToPct(speed: number): number {
+    switch (speed) {
+      case FAN_SPEED.LOW:    return 25;
+      case FAN_SPEED.MEDIUM: return 50;
+      case FAN_SPEED.HIGH:   return 75;
+      case FAN_SPEED.TURBO:  return 100;
+      default:               return 0;
+    }
+  }
+
+  private pctToFanSpeed(pct: number): number {
+    if (pct <= 0)   return FAN_SPEED.AUTO;
+    if (pct <= 37)  return FAN_SPEED.LOW;
+    if (pct <= 62)  return FAN_SPEED.MEDIUM;
+    if (pct <= 87)  return FAN_SPEED.HIGH;
+    return FAN_SPEED.TURBO;
   }
 
   // ── Send Commands to AC ────────────────────────────────────────

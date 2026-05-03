@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.0 (2026-05-03)
+
+- **Fix fan control not sending commands**: HomeKit writes to `percentSetting`, not only `fanMode`. Now subscribing to both attributes. Added `addRequiredClusterServers()` on fan and sleep child endpoints.
+- **Fan pct mapping**: 0%=Auto, 25%=Low, 50%=Medium, 75%=High, 100%=Turbo.
+
 ## 2.0.9 (2026-05-03)
 
 - **Reverted to v2.0.4 architecture**: Fan and Sleep are child endpoints of the thermostat again (`fanDevice` + `onOffSwitch`).
