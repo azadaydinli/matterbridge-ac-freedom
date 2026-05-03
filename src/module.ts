@@ -5,15 +5,21 @@
  *
  * Device structure:
  * - Thermostat endpoint (primary device type → HomeKit climate card)
- * - fanDevice child endpoint (when showExtras=true) → fan speed control inside climate card
+ * - fanDevice child endpoint  (showExtras=true) → fan speed control inside climate card
+ * - onOffSwitch child endpoint (showExtras=true, 2nd+ start) → sleep mode switch
  *
- * Key rule: onOffSwitch MUST NOT be added as a child endpoint on first registration —
- * HomeKit uses the child device types at first registration to determine the tile category.
- * Adding onOffSwitch causes HomeKit to categorise the device as a switch tile, not climate.
- * fanDevice child is safe: HomeKit still shows thermostat as climate card.
+ * Two-phase sleep registration:
+ *   HomeKit commits device category at first Matter commissioning. If onOffSwitch child
+ *   is present at that moment it categorises the device as "switch", not "climate".
+ *   Solution: first startup registers thermostat + fanDevice only → HomeKit commits to
+ *   climate card → serial saved to ac-freedom-state.json. All subsequent startups add
+ *   the onOffSwitch child as well; HomeKit keeps the cached climate card category.
  *
  * Supports both cloud (BroadLink SmartHomeCS) and local (Broadlink UDP) connections.
  */
+
+import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { join } from 'path';
 
 import {
   Matterbridge,
@@ -22,6 +28,7 @@ import {
   PlatformConfig,
   thermostatDevice,
   fanDevice,
+  onOffSwitch,
 } from 'matterbridge';
 import { Thermostat, FanControl } from 'matterbridge/matter/clusters';
 import { AnsiLogger, LogLevel } from 'matterbridge/logger';
@@ -96,6 +103,7 @@ interface ManagedDevice {
   state: AcState;
   thermostat: MatterbridgeEndpoint;
   fanChild?: MatterbridgeEndpoint;
+  sleepChild?: MatterbridgeEndpoint;
   pollTimer?: ReturnType<typeof setInterval>;
   tempDebounce?: ReturnType<typeof setTimeout>;
 }
@@ -109,12 +117,39 @@ export default function initializePlugin(matterbridge: Matterbridge, log: AnsiLo
 export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
   private devices: ManagedDevice[] = [];
 
+  // Serials that have already been registered once (HomeKit has committed climate category).
+  // Persisted to disk so onOffSwitch child can be added safely from the 2nd startup onwards.
+  private registeredSerials = new Set<string>();
+  private stateFile = '';
+
   constructor(matterbridge: Matterbridge, log: AnsiLogger, config: PlatformConfig) {
     super(matterbridge, log, config);
     if (this.verifyMatterbridgeVersion === undefined || typeof this.verifyMatterbridgeVersion !== 'function' || !this.verifyMatterbridgeVersion('3.4.0')) {
       throw new Error(`Requires Matterbridge >= 3.4.0. Current: ${this.matterbridge.matterbridgeVersion}`);
     }
+    this.stateFile = join(this.matterbridge.matterbridgeDirectory, 'ac-freedom-state.json');
+    this.loadState();
     this.log.info('AC Freedom v2 initializing');
+  }
+
+  private loadState(): void {
+    try {
+      if (existsSync(this.stateFile)) {
+        const serials = JSON.parse(readFileSync(this.stateFile, 'utf8')) as string[];
+        this.registeredSerials = new Set(serials);
+        this.log.debug(`Loaded ${this.registeredSerials.size} registered serial(s) from state file`);
+      }
+    } catch {
+      this.registeredSerials = new Set();
+    }
+  }
+
+  private saveState(): void {
+    try {
+      writeFileSync(this.stateFile, JSON.stringify([...this.registeredSerials]));
+    } catch (e) {
+      this.log.warn(`Could not save state file: ${e}`);
+    }
   }
 
   override async onStart(reason?: string): Promise<void> {
@@ -247,10 +282,16 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
         0, 16, 32, 16, 32,
       );
 
-    // ── Fan child endpoint (before registerDevice so HomeKit sees it at first registration)
-    // fanDevice child does NOT trigger switch categorisation — thermostat remains climate card.
-    // onOffSwitch child MUST NOT be added here: it causes HomeKit to categorise as switch.
+    // ── Child endpoints (before registerDevice so HomeKit sees them at commissioning) ──
+    // fanDevice child: safe — does not trigger switch categorisation on first registration.
+    // onOffSwitch child: ONLY added when the device has already been registered once before.
+    //   On first registration HomeKit commits the device category; if onOffSwitch is present
+    //   it categorises as switch. On all subsequent starts the category is already cached as
+    //   climate card, so adding onOffSwitch is safe.
+    const alreadyRegistered = this.registeredSerials.has(serial);
     let fanChild: MatterbridgeEndpoint | undefined;
+    let sleepChild: MatterbridgeEndpoint | undefined;
+
     if (cfg.showExtras) {
       fanChild = thermostat.addChildDeviceType('Fan', fanDevice);
       fanChild.createDefaultFanControlClusterServer(
@@ -259,13 +300,26 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
         0, 0,
       );
       fanChild.addRequiredClusterServers();
+
+      if (alreadyRegistered) {
+        sleepChild = thermostat.addChildDeviceType('Sleep', onOffSwitch);
+        sleepChild.createOnOffClusterServer(false);
+        sleepChild.addRequiredClusterServers();
+      }
     }
 
     thermostat.addRequiredClusterServers();
 
     this.setSelectDevice(serial, cfg.name);
     const selected = this.validateDevice([cfg.name, serial]);
-    if (selected) await this.registerDevice(thermostat);
+    if (selected) {
+      await this.registerDevice(thermostat);
+      if (!alreadyRegistered) {
+        this.registeredSerials.add(serial);
+        this.saveState();
+        this.log.info(`"${cfg.name}" registered for the first time — sleep switch will appear after next restart`);
+      }
+    }
 
     const dev: ManagedDevice = {
       config: cfg,
@@ -276,6 +330,7 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       state,
       thermostat,
       fanChild,
+      sleepChild,
     };
 
     this.devices.push(dev);
@@ -285,7 +340,7 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
   // ── Subscribe (Matter → AC) ────────────────────────────────────
 
   private async subscribe(dev: ManagedDevice): Promise<void> {
-    const { thermostat, fanChild } = dev;
+    const { thermostat, fanChild, sleepChild } = dev;
 
     // System mode
     await thermostat.subscribeAttribute('Thermostat', 'systemMode', (val: unknown) => {
@@ -340,6 +395,14 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       });
     }
 
+    // Sleep switch (child endpoint — present from 2nd startup onwards)
+    if (sleepChild) {
+      await sleepChild.subscribeAttribute('OnOff', 'onOff', (val: unknown) => {
+        dev.state.sleep = val as boolean;
+        this.log.info(`sleep → ${val}`);
+        this.sendSleep(dev, val as boolean);
+      });
+    }
   }
 
   // ── Temperature Debounce ───────────────────────────────────────
@@ -426,7 +489,7 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
   }
 
   private async pushToMatter(dev: ManagedDevice): Promise<void> {
-    const { thermostat, fanChild, state } = dev;
+    const { thermostat, fanChild, sleepChild, state } = dev;
 
     // System mode
     let sysMode: Thermostat.SystemMode;
@@ -470,6 +533,10 @@ export class AcFreedomPlatform extends MatterbridgeDynamicPlatform {
       await fanChild.updateAttribute('FanControl', 'percentCurrent', pct, this.log);
     }
 
+    // Sleep (child endpoint — present from 2nd startup onwards)
+    if (sleepChild) {
+      await sleepChild.updateAttribute('OnOff', 'onOff', state.sleep, this.log);
+    }
   }
 
   // ── Fan Mode Mapping ───────────────────────────────────────────

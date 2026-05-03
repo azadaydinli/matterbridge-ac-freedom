@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.1.6 (2026-05-03)
+
+- **Restore Sleep Mode switch**: Two-phase registration ensures the `onOffSwitch` child is only added from the second Matterbridge startup onwards. On first registration HomeKit commits the device as a climate card (thermostat + fanDevice only); subsequent startups safely add the sleep switch without changing the HomeKit category. Registration state is persisted to `ac-freedom-state.json` in the Matterbridge data directory.
+
 ## 2.1.5 (2026-05-03)
 
 - **Fix Region field**: Removed `enum` constraint entirely. Matterbridge UI does not render dropdowns (neither `oneOf` nor `enum`). Region is now a plain text input with a description listing valid values: `eu`, `usa`, `cn`, `rus`.
